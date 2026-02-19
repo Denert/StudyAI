@@ -1,14 +1,12 @@
 package ru.mike.study.studyai.data
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class OpenAiRequest(
-    val model: String = "gpt-5-mini",
+    val model: String = "gpt-4o-mini",
     val messages: List<OpenAiMessage>,
-    @SerialName("max_completion_tokens")
-    val maxTokens: Int = 1024
+    val temperature: Float = 1.0f
 )
 
 @Serializable

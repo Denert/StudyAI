@@ -19,6 +19,13 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _temperature = MutableStateFlow(1.0f)
+    val temperature: StateFlow<Float> = _temperature.asStateFlow()
+
+    fun setTemperature(value: Float) {
+        _temperature.value = value.coerceIn(0f, 2f)
+    }
+
     fun sendMessage(text: String) {
         if (text.isBlank() || _isLoading.value) return
 
@@ -30,7 +37,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
             val loadingMessage = ChatMessage(content = "", isFromUser = false, isLoading = true)
             _messages.value = _messages.value + loadingMessage
 
-            val result = openAiService.sendMessage(text)
+            val result = openAiService.sendMessage(text, _temperature.value)
 
             _messages.value = _messages.value.dropLast(1)
 

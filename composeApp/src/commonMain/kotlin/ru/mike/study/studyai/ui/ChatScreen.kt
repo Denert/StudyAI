@@ -21,6 +21,7 @@ import ru.mike.study.studyai.viewmodel.ChatViewModel
 fun ChatScreen(viewModel: ChatViewModel) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val temperature by viewModel.temperature.collectAsState()
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -57,18 +58,39 @@ fun ChatScreen(viewModel: ChatViewModel) {
             shadowElevation = 8.dp,
             color = MaterialTheme.colorScheme.surface
         ) {
-            Row(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.padding(16.dp)
             ) {
-                OutlinedTextField(
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Temperature: ${"%.1f".format(temperature)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.width(110.dp)
+                    )
+                    Slider(
+                        value = temperature,
+                        onValueChange = { viewModel.setTemperature(it) },
+                        valueRange = 0f..2f,
+                        steps = 19,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    OutlinedTextField(
                     value = inputText,
                     onValueChange = { inputText = it },
                     modifier = Modifier
                         .weight(1f)
-                        .onKeyEvent { event ->
+                        .onPreviewKeyEvent { event ->
                             if (event.key == Key.Enter && event.type == KeyEventType.KeyDown && !event.isShiftPressed) {
                                 if (inputText.isNotBlank() && !isLoading) {
                                     viewModel.sendMessage(inputText)
@@ -81,8 +103,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
                         },
                     placeholder = { Text("Type a message...") },
                     enabled = !isLoading,
-                    singleLine = true,
-                    shape = RoundedCornerShape(24.dp)
+                    maxLines = 3,
+                    shape = RoundedCornerShape(16.dp)
                 )
 
                 Spacer(modifier = Modifier.width(8.dp))
@@ -106,6 +128,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     } else {
                         Text("Send")
                     }
+                }
                 }
             }
         }

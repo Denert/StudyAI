@@ -1,7 +1,7 @@
 package ru.mike.study.studyai.api
 
 import io.ktor.client.*
-import io.ktor.client.call.*
+import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -24,16 +24,22 @@ class OpenAiService(private val apiKey: String) {
         install(ContentNegotiation) {
             json(json)
         }
+        install(HttpTimeout) {
+            requestTimeoutMillis = 120_000
+            connectTimeoutMillis = 30_000
+            socketTimeoutMillis = 120_000
+        }
     }
 
     private val conversationHistory = mutableListOf<OpenAiMessage>()
 
-    suspend fun sendMessage(userMessage: String): Result<String> {
+    suspend fun sendMessage(userMessage: String, temperature: Float = 1.0f): Result<String> {
         return try {
             conversationHistory.add(OpenAiMessage(role = "user", content = userMessage))
 
             val request = OpenAiRequest(
-                messages = conversationHistory.toList()
+                messages = conversationHistory.toList(),
+                temperature = temperature
             )
 
             println("OpenAI Request: ${json.encodeToString(OpenAiRequest.serializer(), request)}")
