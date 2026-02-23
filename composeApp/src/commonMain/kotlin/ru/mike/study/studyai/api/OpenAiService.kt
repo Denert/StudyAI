@@ -8,9 +8,16 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
+import ru.mike.study.studyai.data.MessageMetadata
 import ru.mike.study.studyai.data.OpenAiMessage
 import ru.mike.study.studyai.data.OpenAiRequest
 import ru.mike.study.studyai.data.OpenAiResponse
+import ru.mike.study.studyai.data.PricingCalculator
+
+data class ChatResult(
+    val content: String,
+    val metadata: MessageMetadata
+)
 
 class OpenAiService(private val apiKey: String) {
 
@@ -33,22 +40,28 @@ class OpenAiService(private val apiKey: String) {
 
     private val conversationHistory = mutableListOf<OpenAiMessage>()
 
-    suspend fun sendMessage(userMessage: String, temperature: Float = 1.0f): Result<String> {
+    suspend fun sendMessage(userMessage: String, temperature: Float = 1.0f, model: String? = null): Result<ChatResult> {
         return try {
             conversationHistory.add(OpenAiMessage(role = "user", content = userMessage))
 
+            val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
             val request = OpenAiRequest(
+                model = requestModel,
                 messages = conversationHistory.toList(),
                 temperature = temperature
             )
 
             println("OpenAI Request: ${json.encodeToString(OpenAiRequest.serializer(), request)}")
 
+            val startTime = System.currentTimeMillis()
+
             val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 setBody(request)
             }
+
+            val responseTimeMs = System.currentTimeMillis() - startTime
 
             val responseText = httpResponse.bodyAsText()
             println("OpenAI Response: $responseText")
@@ -65,7 +78,21 @@ class OpenAiService(private val apiKey: String) {
 
             conversationHistory.add(OpenAiMessage(role = "assistant", content = assistantMessage))
 
-            Result.success(assistantMessage)
+            val modelName = response.model ?: requestModel
+            val promptTokens = response.usage?.promptTokens ?: 0
+            val completionTokens = response.usage?.completionTokens ?: 0
+
+            val metadata = MessageMetadata(
+                model = modelName,
+                promptTokens = promptTokens,
+                completionTokens = completionTokens,
+                totalTokens = response.usage?.totalTokens ?: 0,
+                responseTimeMs = responseTimeMs,
+                temperature = temperature,
+                costRub = PricingCalculator.calculateCostRub(modelName, promptTokens, completionTokens)
+            )
+
+            Result.success(ChatResult(assistantMessage, metadata))
         } catch (e: Exception) {
             println("OpenAI Error: ${e.message}")
             e.printStackTrace()

@@ -22,6 +22,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val temperature by viewModel.temperature.collectAsState()
+    val model by viewModel.model.collectAsState()
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -61,15 +62,27 @@ fun ChatScreen(viewModel: ChatViewModel) {
             Column(
                 modifier = Modifier.padding(16.dp)
             ) {
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { viewModel.setModel(it) },
+                    label = { Text("Model") },
+                    placeholder = { Text("gpt-5-mini") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = "Temperature: ${"%.1f".format(temperature)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.width(110.dp)
+                        style = MaterialTheme.typography.bodyMedium
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Slider(
                         value = temperature,
                         onValueChange = { viewModel.setTemperature(it) },
@@ -86,26 +99,26 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     verticalAlignment = Alignment.Bottom
                 ) {
                     OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    modifier = Modifier
-                        .weight(1f)
-                        .onPreviewKeyEvent { event ->
-                            if (event.key == Key.Enter && event.type == KeyEventType.KeyDown && !event.isShiftPressed) {
-                                if (inputText.isNotBlank() && !isLoading) {
-                                    viewModel.sendMessage(inputText)
-                                    inputText = ""
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .onKeyEvent { event ->
+                                if (event.key == Key.Enter && event.type == KeyEventType.KeyDown && !event.isShiftPressed && !event.isMetaPressed && !event.isCtrlPressed) {
+                                    if (inputText.isNotBlank() && !isLoading) {
+                                        viewModel.sendMessage(inputText)
+                                        inputText = ""
+                                    }
+                                    true
+                                } else {
+                                    false
                                 }
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                    placeholder = { Text("Type a message...") },
-                    enabled = !isLoading,
-                    maxLines = 3,
-                    shape = RoundedCornerShape(16.dp)
-                )
+                            },
+                        placeholder = { Text("Type a message...") },
+                        enabled = !isLoading,
+                        maxLines = 3,
+                        shape = RoundedCornerShape(16.dp)
+                    )
 
                 Spacer(modifier = Modifier.width(8.dp))
 
@@ -149,13 +162,13 @@ fun ChatMessageItem(message: ChatMessage) {
         Alignment.CenterStart
     }
 
-    Box(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        contentAlignment = alignment
+        horizontalAlignment = if (message.isFromUser) Alignment.End else Alignment.Start
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 300.dp)
+                .widthIn(max = 400.dp)
                 .clip(
                     RoundedCornerShape(
                         topStart = 16.dp,
@@ -193,6 +206,17 @@ fun ChatMessageItem(message: ChatMessage) {
                     }
                 )
             }
+        }
+
+        if (!message.isFromUser && message.metadata != null) {
+            val meta = message.metadata
+            val timeSeconds = meta.responseTimeMs / 1000.0
+            Text(
+                text = "Model=${meta.model} | Temp=${meta.temperature} | Time=${String.format("%.2f", timeSeconds)}s | Tokens=${meta.totalTokens} (p=${meta.promptTokens}, c=${meta.completionTokens}) | Cost=${String.format("%.4f", meta.costRub)} ₽",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+            )
         }
     }
 }

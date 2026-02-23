@@ -22,8 +22,15 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     private val _temperature = MutableStateFlow(1.0f)
     val temperature: StateFlow<Float> = _temperature.asStateFlow()
 
+    private val _model = MutableStateFlow("")
+    val model: StateFlow<String> = _model.asStateFlow()
+
     fun setTemperature(value: Float) {
         _temperature.value = value.coerceIn(0f, 2f)
+    }
+
+    fun setModel(value: String) {
+        _model.value = value
     }
 
     fun sendMessage(text: String) {
@@ -37,13 +44,17 @@ class ChatViewModel(apiKey: String) : ViewModel() {
             val loadingMessage = ChatMessage(content = "", isFromUser = false, isLoading = true)
             _messages.value = _messages.value + loadingMessage
 
-            val result = openAiService.sendMessage(text, _temperature.value)
+            val result = openAiService.sendMessage(text, _temperature.value, _model.value.ifBlank { null })
 
             _messages.value = _messages.value.dropLast(1)
 
             result.fold(
-                onSuccess = { response ->
-                    val aiMessage = ChatMessage(content = response, isFromUser = false)
+                onSuccess = { chatResult ->
+                    val aiMessage = ChatMessage(
+                        content = chatResult.content,
+                        isFromUser = false,
+                        metadata = chatResult.metadata
+                    )
                     _messages.value = _messages.value + aiMessage
                 },
                 onFailure = { error ->

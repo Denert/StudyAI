@@ -85,10 +85,17 @@ compose.desktop {
     application {
         mainClass = "ru.mike.study.studyai.MainKt"
 
+        jvmArgs("-Djava.awt.headless=false")
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "ru.mike.study.studyai"
             packageVersion = "1.0.0"
         }
+
+        buildTypes.release.proguard {
+            isEnabled = false
+        }
     }
 }
+
