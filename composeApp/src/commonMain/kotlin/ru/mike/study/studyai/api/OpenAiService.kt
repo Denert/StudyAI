@@ -106,4 +106,8 @@ class OpenAiService(private val apiKey: String) {
     fun clearHistory() {
         conversationHistory.clear()
     }
+
+    fun addToHistory(role: String, content: String) {
+        conversationHistory.add(OpenAiMessage(role = role, content = content))
+    }
 }
