@@ -10,7 +10,13 @@ data class Chat(
     val createdAt: Long = System.currentTimeMillis(),
     val model: String = "",
     val temperature: Float = 1.0f
-)
+) {
+    val totalTokens: Int
+        get() = messages.sumOf { it.metadata?.totalTokens ?: 0 }
+
+    val totalCostRub: Double
+        get() = messages.sumOf { it.metadata?.costRub ?: 0.0 }
+}
 
 @Serializable
 data class ChatMessageData(

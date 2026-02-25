@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -83,33 +85,47 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 Column(
                     modifier = Modifier.padding(16.dp)
                 ) {
-                    OutlinedTextField(
-                        value = model,
-                        onValueChange = { viewModel.setModel(it) },
-                        label = { Text("Model") },
-                        placeholder = { Text("gpt-4o-mini") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
                     Row(
+                        modifier = Modifier.fillMaxWidth().height(36.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(36.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (model.isEmpty()) {
+                                Text(
+                                    "gpt-4o-mini",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            BasicTextField(
+                                value = model,
+                                onValueChange = { viewModel.setModel(it) },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.labelSmall.copy(
+                                    color = MaterialTheme.colorScheme.onSurface
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
                         Text(
-                            text = "Temperature: ${"%.1f".format(temperature)}",
-                            style = MaterialTheme.typography.bodyMedium
+                            text = "T: ${"%.1f".format(temperature)}",
+                            style = MaterialTheme.typography.bodySmall
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Slider(
                             value = temperature,
                             onValueChange = { viewModel.setTemperature(it) },
                             valueRange = 0f..2f,
                             steps = 19,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).height(20.dp)
                         )
                     }
 
@@ -266,10 +282,17 @@ fun ChatListItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${chat.messages.size} messages",
+                    text = "${chat.messages.size} msg | ${chat.totalTokens} tokens",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (chat.totalCostRub > 0) {
+                    Text(
+                        text = "${"%.4f".format(chat.totalCostRub)} ₽",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
             IconButton(
@@ -293,12 +316,6 @@ fun ChatMessageItem(message: ChatMessage) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
         MaterialTheme.colorScheme.secondaryContainer
-    }
-
-    val alignment = if (message.isFromUser) {
-        Alignment.CenterEnd
-    } else {
-        Alignment.CenterStart
     }
 
     Column(
@@ -347,11 +364,19 @@ fun ChatMessageItem(message: ChatMessage) {
             }
         }
 
-        if (!message.isFromUser && message.metadata != null) {
-            val meta = message.metadata
-            val timeSeconds = meta.responseTimeMs / 1000.0
+        if (message.isFromUser) {
+            // Estimate tokens for user message (~2.5 chars per token for Russian/mixed)
+            val estimatedTokens = (message.content.length / 2.5).toInt().coerceAtLeast(1)
             Text(
-                text = "Model=${meta.model} | Temp=${meta.temperature} | Time=${String.format("%.2f", timeSeconds)}s | Tokens=${meta.totalTokens} (p=${meta.promptTokens}, c=${meta.completionTokens}) | Cost=${String.format("%.4f", meta.costRub)} ₽",
+                text = "~$estimatedTokens tokens",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 4.dp, top = 4.dp)
+            )
+        } else if (message.metadata != null) {
+            val meta = message.metadata
+            Text(
+                text = "${meta.totalTokens} tokens | ${String.format("%.4f", meta.costRub)} ₽",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp)
