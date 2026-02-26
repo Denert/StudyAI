@@ -7,6 +7,7 @@ data class Chat(
     val id: String,
     val name: String,
     val messages: List<ChatMessageData> = emptyList(),
+    val summaries: List<ChatSummaryData> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val model: String = "",
     val temperature: Float = 1.0f
@@ -16,7 +17,20 @@ data class Chat(
 
     val totalCostRub: Double
         get() = messages.sumOf { it.metadata?.costRub ?: 0.0 }
+
+    val summaryTokens: Int
+        get() = summaries.sumOf { it.tokenCount }
 }
+
+@Serializable
+data class ChatSummaryData(
+    val id: String,
+    val messageStartIndex: Int,
+    val messageEndIndex: Int,
+    val content: String,
+    val tokenCount: Int,
+    val createdAt: Long = System.currentTimeMillis()
+)
 
 @Serializable
 data class ChatMessageData(

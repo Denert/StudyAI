@@ -282,7 +282,7 @@ fun ChatListItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${chat.messages.size} msg | ${chat.totalTokens} tokens",
+                    text = "${chat.messages.size} msg | ${chat.summaries.size} sum | ${chat.totalTokens} tok",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

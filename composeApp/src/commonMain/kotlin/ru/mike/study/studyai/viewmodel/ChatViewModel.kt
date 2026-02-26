@@ -9,9 +9,11 @@ import kotlinx.coroutines.launch
 import ru.mike.study.studyai.api.OpenAiService
 import ru.mike.study.studyai.data.Chat
 import ru.mike.study.studyai.data.ChatMessage
+import ru.mike.study.studyai.data.ChatSummaryData
 import ru.mike.study.studyai.data.toChatMessage
 import ru.mike.study.studyai.data.toData
 import ru.mike.study.studyai.storage.ChatStorage
+import java.util.UUID
 
 class ChatViewModel(apiKey: String) : ViewModel() {
 
@@ -35,6 +37,10 @@ class ChatViewModel(apiKey: String) : ViewModel() {
 
     private val _model = MutableStateFlow("")
     val model: StateFlow<String> = _model.asStateFlow()
+
+    // Track summaries for current chat
+    private val _summaries = MutableStateFlow<List<ChatSummaryData>>(emptyList())
+    private var summarizedMessageCount = 0
 
     init {
         loadChats()
@@ -62,10 +68,19 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         val chat = chatStorage.getChat(chatId)
         _currentChat.value = chat
         _messages.value = chat?.messages?.map { it.toChatMessage() } ?: emptyList()
+        _summaries.value = chat?.summaries ?: emptyList()
         _model.value = chat?.model ?: ""
         _temperature.value = chat?.temperature ?: 1.0f
 
-        // Restore conversation history in OpenAI service
+        // Calculate how many messages were summarized
+        summarizedMessageCount = _summaries.value.sumOf { it.messageEndIndex - it.messageStartIndex + 1 }
+
+        // Restore summaries in OpenAI service
+        chat?.summaries?.forEach { summary ->
+            openAiService.addSummary(summary.content)
+        }
+
+        // Restore conversation history in OpenAI service (only recent messages)
         chat?.messages?.forEach { msg ->
             if (msg.isFromUser) {
                 openAiService.addToHistory("user", msg.content)
@@ -103,10 +118,12 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         val chat = _currentChat.value ?: return
         val updatedChat = chat.copy(
             messages = _messages.value.filter { !it.isLoading }.map { it.toData() },
+            summaries = _summaries.value,
             model = _model.value,
             temperature = _temperature.value
         )
         chatStorage.saveChat(updatedChat)
+        _currentChat.value = updatedChat
         _chats.value = _chats.value.map { if (it.id == chat.id) updatedChat else it }
     }
 
@@ -141,6 +158,9 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                         metadata = chatResult.metadata
                     )
                     _messages.value = _messages.value + aiMessage
+
+                    // Check if we need to summarize old messages
+                    checkAndSummarizeIfNeeded()
                 },
                 onFailure = { error ->
                     val errorMessage = ChatMessage(
@@ -162,8 +182,36 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         }
     }
 
+    private suspend fun checkAndSummarizeIfNeeded() {
+        val summaryResult = openAiService.checkAndSummarize(_model.value.ifBlank { null })
+
+        if (summaryResult != null) {
+            // Create new summary data
+            val startIndex = summarizedMessageCount
+            val endIndex = startIndex + OpenAiService.BATCH_SIZE_FOR_SUMMARY - 1
+
+            val newSummary = ChatSummaryData(
+                id = UUID.randomUUID().toString(),
+                messageStartIndex = startIndex,
+                messageEndIndex = endIndex,
+                content = summaryResult.content,
+                tokenCount = summaryResult.tokenCount
+            )
+
+            _summaries.value = _summaries.value + newSummary
+            summarizedMessageCount += OpenAiService.BATCH_SIZE_FOR_SUMMARY
+
+            // Remove summarized messages from UI
+            _messages.value = _messages.value.drop(OpenAiService.BATCH_SIZE_FOR_SUMMARY)
+
+            println("Context management: Created summary #${_summaries.value.size}, removed ${OpenAiService.BATCH_SIZE_FOR_SUMMARY} old messages")
+        }
+    }
+
     fun clearChat() {
         _messages.value = emptyList()
+        _summaries.value = emptyList()
+        summarizedMessageCount = 0
         openAiService.clearHistory()
         saveCurrentChat()
     }
