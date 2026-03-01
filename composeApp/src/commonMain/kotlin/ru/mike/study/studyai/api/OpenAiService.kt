@@ -9,6 +9,8 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import ru.mike.study.studyai.data.ContextStrategy
+import ru.mike.study.studyai.data.FactData
 import ru.mike.study.studyai.data.MessageMetadata
 import ru.mike.study.studyai.data.OpenAiMessage
 import ru.mike.study.studyai.data.OpenAiRequest
@@ -25,10 +27,15 @@ data class SummaryResult(
     val tokenCount: Int
 )
 
+data class FactsResult(
+    val facts: List<FactData>,
+    val tokenCount: Int
+)
+
 class OpenAiService(private val apiKey: String) {
 
     companion object {
-        const val RECENT_MESSAGES_COUNT = 10
+        const val DEFAULT_SLIDING_WINDOW_SIZE = 10
         const val BATCH_SIZE_FOR_SUMMARY = 10
     }
 
@@ -56,11 +63,35 @@ class OpenAiService(private val apiKey: String) {
         }
     }
 
-    // Full conversation history (recent messages only)
-    private val recentMessages = mutableListOf<OpenAiMessage>()
+    // All messages in conversation
+    private val allMessages = mutableListOf<OpenAiMessage>()
 
-    // Summaries of older messages
+    // Summaries (for SUMMARY strategy)
     private val summaries = mutableListOf<String>()
+
+    // Facts (for STICKY_FACTS strategy)
+    private val facts = mutableListOf<FactData>()
+
+    // Current strategy settings
+    private var currentStrategy: ContextStrategy = ContextStrategy.NONE
+    private var slidingWindowSize: Int = DEFAULT_SLIDING_WINDOW_SIZE
+
+    fun setStrategy(strategy: ContextStrategy) {
+        currentStrategy = strategy
+        println("★ Strategy changed to: $strategy")
+    }
+
+    fun setSlidingWindowSize(size: Int) {
+        slidingWindowSize = size
+        println("★ Sliding window size set to: $size")
+    }
+
+    fun setFacts(newFacts: List<FactData>) {
+        facts.clear()
+        facts.addAll(newFacts)
+    }
+
+    fun getFacts(): List<FactData> = facts.toList()
 
     suspend fun sendMessage(
         userMessage: String,
@@ -68,11 +99,11 @@ class OpenAiService(private val apiKey: String) {
         model: String? = null
     ): Result<ChatResult> {
         return try {
-            recentMessages.add(OpenAiMessage(role = "user", content = userMessage))
+            allMessages.add(OpenAiMessage(role = "user", content = userMessage))
 
             val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
 
-            // Build context: summaries + recent messages
+            // Build context based on current strategy
             val contextMessages = buildContextMessages()
 
             val request = OpenAiRequest(
@@ -82,7 +113,7 @@ class OpenAiService(private val apiKey: String) {
             )
 
             println("═══════════════════════════════════════════════════════════")
-            println("OpenAI Request (${contextMessages.size} messages):")
+            println("OpenAI Request [Strategy: $currentStrategy] (${contextMessages.size} messages):")
             println(jsonPretty.encodeToString(OpenAiRequest.serializer(), request))
             println("═══════════════════════════════════════════════════════════")
 
@@ -110,14 +141,14 @@ class OpenAiService(private val apiKey: String) {
             val response = json.decodeFromString<OpenAiResponse>(responseText)
 
             if (response.error != null) {
-                recentMessages.removeAt(recentMessages.lastIndex)
+                allMessages.removeAt(allMessages.lastIndex)
                 return Result.failure(Exception("API Error: ${response.error.message}"))
             }
 
             val assistantMessage = response.choices?.firstOrNull()?.message?.content
                 ?: "No response received"
 
-            recentMessages.add(OpenAiMessage(role = "assistant", content = assistantMessage))
+            allMessages.add(OpenAiMessage(role = "assistant", content = assistantMessage))
 
             val modelName = response.model ?: requestModel
             val promptTokens = response.usage?.promptTokens ?: 0
@@ -137,40 +168,139 @@ class OpenAiService(private val apiKey: String) {
         } catch (e: Exception) {
             println("OpenAI Error: ${e.message}")
             e.printStackTrace()
-            if (recentMessages.isNotEmpty()) {
-                recentMessages.removeAt(recentMessages.lastIndex)
+            if (allMessages.isNotEmpty()) {
+                allMessages.removeAt(allMessages.lastIndex)
             }
             Result.failure(e)
         }
     }
 
     /**
-     * Check if summarization is needed and perform it
-     * Returns SummaryResult if summary was created, null otherwise
+     * Build context messages based on current strategy
+     */
+    private fun buildContextMessages(): List<OpenAiMessage> {
+        return when (currentStrategy) {
+            ContextStrategy.NONE -> buildNoStrategyContext()
+            ContextStrategy.SLIDING_WINDOW -> buildSlidingWindowContext()
+            ContextStrategy.SUMMARY -> buildSummaryContext()
+            ContextStrategy.STICKY_FACTS -> buildStickyFactsContext()
+            ContextStrategy.BRANCHING -> buildNoStrategyContext() // Branching uses full context
+        }
+    }
+
+    /**
+     * NONE strategy: Send all messages as-is
+     */
+    private fun buildNoStrategyContext(): List<OpenAiMessage> {
+        println("★ Strategy NONE: sending all ${allMessages.size} messages")
+        return allMessages.toList()
+    }
+
+    /**
+     * SLIDING_WINDOW strategy: Keep only last N messages
+     */
+    private fun buildSlidingWindowContext(): List<OpenAiMessage> {
+        val messages = if (allMessages.size > slidingWindowSize) {
+            allMessages.takeLast(slidingWindowSize)
+        } else {
+            allMessages.toList()
+        }
+        println("★ Strategy SLIDING_WINDOW: sending last ${messages.size} of ${allMessages.size} messages (window=$slidingWindowSize)")
+        return messages
+    }
+
+    /**
+     * SUMMARY strategy: Summaries + recent messages
+     */
+    private fun buildSummaryContext(): List<OpenAiMessage> {
+        val contextMessages = mutableListOf<OpenAiMessage>()
+
+        // Add summaries as system context
+        if (summaries.isNotEmpty()) {
+            val summaryContext = summaries.mapIndexed { index, summary ->
+                "[Summary ${index + 1}]: $summary"
+            }.joinToString("\n\n")
+
+            contextMessages.add(OpenAiMessage(
+                role = "system",
+                content = "Previous conversation context:\n$summaryContext"
+            ))
+        }
+
+        // Add recent messages (last N that weren't summarized)
+        val recentCount = minOf(allMessages.size, slidingWindowSize)
+        contextMessages.addAll(allMessages.takeLast(recentCount))
+
+        println("★ Strategy SUMMARY: ${summaries.size} summaries + ${recentCount} recent messages = ${contextMessages.size} total")
+        return contextMessages
+    }
+
+    /**
+     * STICKY_FACTS strategy: Facts + last N messages
+     */
+    private fun buildStickyFactsContext(): List<OpenAiMessage> {
+        val contextMessages = mutableListOf<OpenAiMessage>()
+
+        // Add facts as system context
+        if (facts.isNotEmpty()) {
+            val factsContext = facts.joinToString("\n") { fact ->
+                "- ${fact.key}: ${fact.value}"
+            }
+
+            contextMessages.add(OpenAiMessage(
+                role = "system",
+                content = "Important facts from conversation:\n$factsContext"
+            ))
+
+            println("")
+            println("┌──────────────────────────────────────────────────────────┐")
+            println("│  📌 FACTS INCLUDED IN CONTEXT:                          │")
+            println("├──────────────────────────────────────────────────────────┤")
+            facts.forEach { fact ->
+                println("│  • ${fact.key}: ${fact.value}")
+            }
+            println("└──────────────────────────────────────────────────────────┘")
+        }
+
+        // Add last N messages
+        val recentMessages = if (allMessages.size > slidingWindowSize) {
+            allMessages.takeLast(slidingWindowSize)
+        } else {
+            allMessages.toList()
+        }
+        contextMessages.addAll(recentMessages)
+
+        println("★ Strategy STICKY_FACTS: ${facts.size} facts + ${recentMessages.size} recent messages = ${contextMessages.size} total")
+        return contextMessages
+    }
+
+    /**
+     * Check if summarization is needed and perform it (for SUMMARY strategy)
      */
     suspend fun checkAndSummarize(model: String? = null): SummaryResult? {
-        // Need to summarize if we have more than RECENT_MESSAGES_COUNT + BATCH_SIZE_FOR_SUMMARY
-        if (recentMessages.size <= RECENT_MESSAGES_COUNT + BATCH_SIZE_FOR_SUMMARY) {
+        if (currentStrategy != ContextStrategy.SUMMARY) {
             return null
         }
 
-        // Take first BATCH_SIZE_FOR_SUMMARY messages to summarize
-        val messagesToSummarize = recentMessages.take(BATCH_SIZE_FOR_SUMMARY)
+        // Calculate how many messages are not yet summarized
+        val summarizedCount = summaries.size * BATCH_SIZE_FOR_SUMMARY
+        val unsummarizedCount = allMessages.size - summarizedCount
+
+        // Need to summarize if we have more than slidingWindowSize + BATCH_SIZE_FOR_SUMMARY unsummarized
+        if (unsummarizedCount <= slidingWindowSize + BATCH_SIZE_FOR_SUMMARY) {
+            return null
+        }
+
+        // Take messages to summarize (from after last summary to batch size)
+        val startIndex = summarizedCount
+        val endIndex = startIndex + BATCH_SIZE_FOR_SUMMARY
+        val messagesToSummarize = allMessages.subList(startIndex, endIndex)
 
         val summaryResult = generateSummary(messagesToSummarize, model)
 
         if (summaryResult != null) {
-            // Add to summaries list
             summaries.add(summaryResult.content)
-
-            // Remove summarized messages from recent
-            repeat(BATCH_SIZE_FOR_SUMMARY) {
-                if (recentMessages.isNotEmpty()) {
-                    recentMessages.removeAt(0)
-                }
-            }
-
-            println("Created summary for $BATCH_SIZE_FOR_SUMMARY messages. Summaries count: ${summaries.size}, Recent messages: ${recentMessages.size}")
+            println("★ Created summary #${summaries.size} for messages $startIndex-${endIndex - 1}")
         }
 
         return summaryResult
@@ -202,7 +332,7 @@ Summary:"""
             val request = OpenAiRequest(
                 model = requestModel,
                 messages = listOf(OpenAiMessage(role = "user", content = summaryPrompt)),
-                temperature = 0.3f // Lower temperature for more consistent summaries
+                temperature = 0.3f
             )
 
             println("▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓")
@@ -248,47 +378,164 @@ Summary:"""
     }
 
     /**
-     * Build context messages for API request
+     * Extract facts from last user message (for STICKY_FACTS strategy)
+     * Appends new facts to existing ones
      */
-    private fun buildContextMessages(): List<OpenAiMessage> {
-        val contextMessages = mutableListOf<OpenAiMessage>()
+    suspend fun extractFacts(model: String? = null): FactsResult? {
+        // Get last user message
+        val lastUserMessage = allMessages.lastOrNull { it.role == "user" } ?: return null
 
-        // Add summaries as system context if any exist
-        if (summaries.isNotEmpty()) {
-            val summaryContext = summaries.mapIndexed { index, summary ->
-                "[Summary ${index + 1}]: $summary"
-            }.joinToString("\n\n")
+        return try {
+            val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
 
-            contextMessages.add(OpenAiMessage(
-                role = "system",
-                content = "Previous conversation context:\n$summaryContext"
-            ))
+            val existingFactsText = if (facts.isNotEmpty()) {
+                facts.joinToString("\n") { "- ${it.key}: ${it.value}" }
+            } else {
+                "Пока нет"
+            }
 
-            println("★★★ Including ${summaries.size} summaries in request ★★★")
+            val factsPrompt = """Проанализируй сообщение пользователя и извлеки новые факты или обнови существующие.
+
+Существующие факты:
+$existingFactsText
+
+Сообщение пользователя:
+${lastUserMessage.content}
+
+Если в сообщении есть новые важные факты - добавь их.
+Если факт изменился - верни обновлённую версию.
+Если новых фактов нет - верни только существующие факты без изменений.
+
+Формат ответа (каждый факт на новой строке):
+КЛЮЧ: значение
+
+Категории фактов:
+- Имя: как зовут пользователя
+- Цель: что хочет пользователь
+- Контекст: важный контекст задачи
+- Ограничения: какие есть ограничения
+- Предпочтения: что предпочитает пользователь
+- Технологии: какие технологии используются
+
+Только важные факты, кратко."""
+
+            val request = OpenAiRequest(
+                model = requestModel,
+                messages = listOf(OpenAiMessage(role = "user", content = factsPrompt)),
+                temperature = 0.3f
+            )
+
+            println("")
+            println("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            println("┃  📋 FACTS EXTRACTION REQUEST                              ┃")
+            println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            println("┃  Model: $requestModel")
+            println("┃  Existing facts: ${facts.size}")
+            println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            println("┃  USER MESSAGE:")
+            println("┃  ──────────────")
+            lastUserMessage.content.lines().forEach { line ->
+                println("┃  $line")
+            }
+            println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+            println("")
+
+            val startTime = System.currentTimeMillis()
+
+            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+                setBody(request)
+            }
+
+            val responseTimeMs = System.currentTimeMillis() - startTime
+            val responseText = httpResponse.bodyAsText()
+            val response = json.decodeFromString<OpenAiResponse>(responseText)
+
+            println("")
+            println("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            println("┃  📋 FACTS EXTRACTION RESPONSE                             ┃")
+            println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            println("┃  Response time: ${responseTimeMs}ms")
+            println("┃  Tokens: ${response.usage?.totalTokens ?: 0} (prompt: ${response.usage?.promptTokens ?: 0}, completion: ${response.usage?.completionTokens ?: 0})")
+
+            if (response.error != null) {
+                println("┃  ❌ ERROR: ${response.error.message}")
+                println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+                return null
+            }
+
+            val factsContent = response.choices?.firstOrNull()?.message?.content ?: return null
+            val tokenCount = response.usage?.totalTokens ?: 0
+
+            println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            println("┃  LLM RESPONSE:")
+            println("┃  ─────────────")
+            factsContent.lines().forEach { line ->
+                println("┃  $line")
+            }
+
+            // Parse facts from response
+            val newFacts = parseFacts(factsContent)
+
+            // Update internal facts
+            facts.clear()
+            facts.addAll(newFacts)
+
+            println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            println("┃  ✅ PARSED FACTS (${newFacts.size}):")
+            println("┃  ─────────────────")
+            newFacts.forEachIndexed { index, fact ->
+                println("┃  ${index + 1}. ${fact.key}: ${fact.value}")
+            }
+            println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+            println("")
+
+            FactsResult(newFacts, tokenCount)
+        } catch (e: Exception) {
+            println("Facts extraction failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Parse facts from LLM response
+     */
+    private fun parseFacts(response: String): List<FactData> {
+        val factsList = mutableListOf<FactData>()
+
+        response.lines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isNotEmpty() && trimmed.contains(":")) {
+                val colonIndex = trimmed.indexOf(":")
+                val key = trimmed.substring(0, colonIndex).trim().trimStart('-', '•', '*', ' ')
+                val value = trimmed.substring(colonIndex + 1).trim()
+                if (key.isNotEmpty() && value.isNotEmpty()) {
+                    factsList.add(FactData(key = key, value = value))
+                }
+            }
         }
 
-        // Add recent messages
-        contextMessages.addAll(recentMessages)
-
-        println("★★★ Context: ${summaries.size} summaries + ${recentMessages.size} recent messages = ${contextMessages.size} total ★★★")
-
-        return contextMessages
+        return factsList
     }
 
     fun clearHistory() {
-        recentMessages.clear()
+        allMessages.clear()
         summaries.clear()
+        facts.clear()
     }
 
     fun addToHistory(role: String, content: String) {
-        recentMessages.add(OpenAiMessage(role = role, content = content))
+        allMessages.add(OpenAiMessage(role = role, content = content))
     }
 
     fun addSummary(summary: String) {
         summaries.add(summary)
     }
 
-    fun getRecentMessagesCount(): Int = recentMessages.size
+    fun getAllMessagesCount(): Int = allMessages.size
 
     fun getSummariesCount(): Int = summaries.size
+
+    fun getFactsCount(): Int = facts.size
 }
