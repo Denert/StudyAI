@@ -388,6 +388,7 @@ fun strategyDisplayName(strategy: ContextStrategy): String {
         ContextStrategy.SUMMARY -> "Summary"
         ContextStrategy.STICKY_FACTS -> "Facts"
         ContextStrategy.BRANCHING -> "Branch"
+        ContextStrategy.MEMORY_LAYERS -> "Memory"
     }
 }
 
@@ -398,6 +399,7 @@ fun strategyDescription(strategy: ContextStrategy): String {
         ContextStrategy.SUMMARY -> "Summarize old messages"
         ContextStrategy.STICKY_FACTS -> "Extract key facts"
         ContextStrategy.BRANCHING -> "Create dialog branches"
+        ContextStrategy.MEMORY_LAYERS -> "3-layer memory"
     }
 }
 
@@ -453,6 +455,13 @@ fun StrategyInfoBar(
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
+                }
+                ContextStrategy.MEMORY_LAYERS -> {
+                    Text(
+                        "| Short-term + Working + Long-term",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
                 }
                 else -> {}
             }

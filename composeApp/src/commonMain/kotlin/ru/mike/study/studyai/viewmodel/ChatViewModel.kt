@@ -150,6 +150,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         openAiService.setStrategy(_strategy.value)
         openAiService.setSlidingWindowSize(_slidingWindowSize.value)
         openAiService.setFacts(_facts.value)
+        openAiService.setChatId(chatId)
 
         // Restore summaries in OpenAI service
         chat?.summaries?.forEach { summary ->
@@ -511,6 +512,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                     when (_strategy.value) {
                         ContextStrategy.SUMMARY -> checkAndSummarizeIfNeeded()
                         ContextStrategy.STICKY_FACTS -> extractFactsIfNeeded()
+                        ContextStrategy.MEMORY_LAYERS -> extractMemoryLayersIfNeeded()
                         else -> { /* No post-processing */ }
                     }
                 },
@@ -557,6 +559,14 @@ class ChatViewModel(apiKey: String) : ViewModel() {
             _facts.value = factsResult.facts
             openAiService.setFacts(_facts.value)
             println("Context management: Updated facts (${_facts.value.size} facts)")
+        }
+    }
+
+    private suspend fun extractMemoryLayersIfNeeded() {
+        // Extract and update memory layers after every assistant response
+        val success = openAiService.extractMemoryUpdates(_model.value.ifBlank { null })
+        if (success) {
+            println("Context management: Memory layers updated")
         }
     }
 

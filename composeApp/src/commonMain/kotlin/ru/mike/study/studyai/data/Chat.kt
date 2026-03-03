@@ -8,7 +8,8 @@ enum class ContextStrategy {
     SLIDING_WINDOW, // Keep last N messages only
     SUMMARY,        // Summarize old messages
     STICKY_FACTS,   // Extract key-value facts + last N messages
-    BRANCHING       // Create branches from checkpoints
+    BRANCHING,      // Create branches from checkpoints
+    MEMORY_LAYERS   // 3-layer memory: short-term, working, long-term
 }
 
 @Serializable

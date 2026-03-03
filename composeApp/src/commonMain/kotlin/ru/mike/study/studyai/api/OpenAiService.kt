@@ -16,6 +16,7 @@ import ru.mike.study.studyai.data.OpenAiMessage
 import ru.mike.study.studyai.data.OpenAiRequest
 import ru.mike.study.studyai.data.OpenAiResponse
 import ru.mike.study.studyai.data.PricingCalculator
+import ru.mike.study.studyai.memory.MemoryService
 
 data class ChatResult(
     val content: String,
@@ -75,6 +76,16 @@ class OpenAiService(private val apiKey: String) {
     // Current strategy settings
     private var currentStrategy: ContextStrategy = ContextStrategy.NONE
     private var slidingWindowSize: Int = DEFAULT_SLIDING_WINDOW_SIZE
+
+    // Memory layers (for MEMORY_LAYERS strategy)
+    private val memoryService = MemoryService()
+    private var currentChatId: String = ""
+
+    fun setChatId(chatId: String) {
+        currentChatId = chatId
+    }
+
+    fun getMemoryService(): MemoryService = memoryService
 
     fun setStrategy(strategy: ContextStrategy) {
         currentStrategy = strategy
@@ -185,6 +196,7 @@ class OpenAiService(private val apiKey: String) {
             ContextStrategy.SUMMARY -> buildSummaryContext()
             ContextStrategy.STICKY_FACTS -> buildStickyFactsContext()
             ContextStrategy.BRANCHING -> buildNoStrategyContext() // Branching uses full context
+            ContextStrategy.MEMORY_LAYERS -> buildMemoryLayersContext()
         }
     }
 
@@ -272,6 +284,297 @@ class OpenAiService(private val apiKey: String) {
 
         println("★ Strategy STICKY_FACTS: ${facts.size} facts + ${recentMessages.size} recent messages = ${contextMessages.size} total")
         return contextMessages
+    }
+
+    /**
+     * MEMORY_LAYERS strategy: 3-layer memory system
+     * - Long-term: User profile, preferences, knowledge (global)
+     * - Working: Sub-tasks/topics within dialog (per-chat)
+     * - Short-term: FULL dialog (all messages)
+     */
+    private fun buildMemoryLayersContext(): List<OpenAiMessage> {
+        val contextMessages = mutableListOf<OpenAiMessage>()
+
+        // Build memory context from long-term and working memory
+        val memoryContext = memoryService.buildMemoryContext(currentChatId)
+
+        if (memoryContext.isNotBlank()) {
+            contextMessages.add(OpenAiMessage(
+                role = "system",
+                content = memoryContext
+            ))
+
+            println("")
+            println("┌──────────────────────────────────────────────────────────┐")
+            println("│  🧠 MEMORY LAYERS INCLUDED IN CONTEXT:                  │")
+            println("├──────────────────────────────────────────────────────────┤")
+            memoryContext.lines().take(15).forEach { line ->
+                println("│  $line")
+            }
+            if (memoryContext.lines().size > 15) {
+                println("│  ... (${memoryContext.lines().size - 15} more lines)")
+            }
+            println("└──────────────────────────────────────────────────────────┘")
+        }
+
+        // SHORT-TERM MEMORY: Add ALL messages (full dialog)
+        contextMessages.addAll(allMessages.toList())
+
+        memoryService.logMemoryState(currentChatId)
+        println("★ Strategy MEMORY_LAYERS: memory context + ${allMessages.size} messages (full dialog) = ${contextMessages.size} total")
+        return contextMessages
+    }
+
+    /**
+     * Extract and update memory layers from conversation
+     * Called after each assistant response
+     */
+    suspend fun extractMemoryUpdates(model: String? = null): Boolean {
+        if (currentChatId.isEmpty()) {
+            println("⚠ Cannot extract memory: no chat ID set")
+            return false
+        }
+
+        val lastUserMessage = allMessages.lastOrNull { it.role == "user" }?.content ?: return false
+        val lastAssistantMessage = allMessages.lastOrNull { it.role == "assistant" }?.content ?: return false
+
+        return try {
+            val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
+
+            // Get current memory state
+            val longTerm = memoryService.readLongTermMemory()
+            val working = memoryService.readWorkingMemory(currentChatId)
+
+            val currentLongTermStr = buildString {
+                appendLine("Profile: ${longTerm.profile.entries.joinToString(", ") { "${it.key}=${it.value}" }}")
+                appendLine("Preferences: ${longTerm.preferences.entries.joinToString(", ") { "${it.key}=${it.value}" }}")
+                appendLine("Knowledge: ${longTerm.knowledge.joinToString("; ")}")
+            }
+
+            val currentWorkingStr = buildString {
+                if (working.currentTask != null) {
+                    appendLine("Current task: ${working.currentTask?.name}")
+                    appendLine("Task context: ${working.currentTask?.context?.joinToString("; ") ?: "none"}")
+                } else {
+                    appendLine("No active task")
+                }
+                appendLine("Active tasks: ${working.activeTasks.joinToString(", ") { it.name }}")
+                appendLine("Completed tasks: ${working.completedTasks.joinToString(", ") { it.name }}")
+            }
+
+            val extractionPrompt = """Проанализируй последний обмен сообщениями и определи, что сохранить в память.
+
+ТЕКУЩАЯ ДОЛГОВРЕМЕННАЯ ПАМЯТЬ (глобальная):
+$currentLongTermStr
+
+ТЕКУЩАЯ РАБОЧАЯ ПАМЯТЬ (подзадачи диалога):
+$currentWorkingStr
+
+ПОСЛЕДНЕЕ СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ:
+$lastUserMessage
+
+ОТВЕТ АССИСТЕНТА:
+$lastAssistantMessage
+
+Определи:
+
+1. ДОЛГОВРЕМЕННАЯ ПАМЯТЬ (сохраняется навсегда):
+   - Профиль: имя, роль, профессия пользователя
+   - Предпочтения: язык, стиль общения
+   - Знания: важные факты о проекте, технологиях
+
+2. РАБОЧАЯ ПАМЯТЬ (подзадачи в диалоге):
+   - Это НОВАЯ подзадача или продолжение текущей?
+   - Название подзадачи (кратко, 3-5 слов)
+   - Контекст подзадачи (ключевые решения, артефакты)
+   - Текущая подзадача ЗАВЕРШЕНА?
+
+Ответь СТРОГО в формате:
+
+LONG_TERM_PROFILE:
+ключ: значение
+
+LONG_TERM_PREFERENCES:
+ключ: значение
+
+LONG_TERM_KNOWLEDGE:
+- факт
+
+NEW_TASK:
+yes/no
+
+TASK_NAME:
+название подзадачи
+
+TASK_CONTEXT:
+- ключевое решение или факт
+
+TASK_COMPLETED:
+yes/no"""
+
+            val request = OpenAiRequest(
+                model = requestModel,
+                messages = listOf(OpenAiMessage(role = "user", content = extractionPrompt)),
+                temperature = 0.2f
+            )
+
+            println("")
+            println("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            println("┃  🧠 MEMORY EXTRACTION REQUEST                             ┃")
+            println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            println("┃  Model: $requestModel")
+            println("┃  Current task: ${working.currentTask?.name ?: "none"}")
+            println("┃  User message: ${lastUserMessage.take(50)}...")
+            println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+
+            val startTime = System.currentTimeMillis()
+
+            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+                setBody(request)
+            }
+
+            val responseTimeMs = System.currentTimeMillis() - startTime
+            val responseText = httpResponse.bodyAsText()
+            val response = json.decodeFromString<OpenAiResponse>(responseText)
+
+            if (response.error != null) {
+                println("┃  ❌ Memory extraction error: ${response.error.message}")
+                return false
+            }
+
+            val content = response.choices?.firstOrNull()?.message?.content ?: return false
+
+            println("")
+            println("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            println("┃  🧠 MEMORY EXTRACTION RESPONSE                            ┃")
+            println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            println("┃  Response time: ${responseTimeMs}ms")
+            println("┃  Tokens: ${response.usage?.totalTokens ?: 0}")
+            println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            content.lines().forEach { line ->
+                println("┃  $line")
+            }
+            println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+
+            // Parse and apply memory updates
+            parseAndApplyMemoryUpdates(content)
+
+            true
+        } catch (e: Exception) {
+            println("Memory extraction failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Parse LLM response and update memory layers
+     */
+    private fun parseAndApplyMemoryUpdates(content: String) {
+        var currentSection = ""
+        val profileUpdates = mutableMapOf<String, String>()
+        val preferenceUpdates = mutableMapOf<String, String>()
+        val knowledgeUpdates = mutableListOf<String>()
+        var isNewTask = false
+        var taskName = ""
+        val taskContext = mutableListOf<String>()
+        var taskCompleted = false
+
+        content.lines().forEach { line ->
+            val trimmed = line.trim()
+            when {
+                trimmed.startsWith("LONG_TERM_PROFILE:") -> currentSection = "profile"
+                trimmed.startsWith("LONG_TERM_PREFERENCES:") -> currentSection = "preferences"
+                trimmed.startsWith("LONG_TERM_KNOWLEDGE:") -> currentSection = "knowledge"
+                trimmed.startsWith("NEW_TASK:") -> {
+                    isNewTask = trimmed.lowercase().contains("yes")
+                    currentSection = ""
+                }
+                trimmed.startsWith("TASK_NAME:") -> {
+                    currentSection = "taskname"
+                    val value = trimmed.removePrefix("TASK_NAME:").trim()
+                    if (value.isNotEmpty()) taskName = value
+                }
+                trimmed.startsWith("TASK_CONTEXT:") -> currentSection = "taskcontext"
+                trimmed.startsWith("TASK_COMPLETED:") -> {
+                    taskCompleted = trimmed.lowercase().contains("yes")
+                    currentSection = ""
+                }
+                trimmed.contains(":") && currentSection in listOf("profile", "preferences") -> {
+                    val colonIdx = trimmed.indexOf(":")
+                    val key = trimmed.substring(0, colonIdx).trim().trimStart('-', ' ')
+                    val value = trimmed.substring(colonIdx + 1).trim()
+                    if (key.isNotEmpty() && value.isNotEmpty()) {
+                        when (currentSection) {
+                            "profile" -> profileUpdates[key] = value
+                            "preferences" -> preferenceUpdates[key] = value
+                        }
+                    }
+                }
+                trimmed.startsWith("-") -> {
+                    val item = trimmed.removePrefix("-").trim()
+                    if (item.isNotEmpty()) {
+                        when (currentSection) {
+                            "knowledge" -> knowledgeUpdates.add(item)
+                            "taskcontext" -> taskContext.add(item)
+                        }
+                    }
+                }
+                currentSection == "taskname" && trimmed.isNotEmpty() && !trimmed.startsWith("TASK") -> {
+                    if (taskName.isEmpty()) taskName = trimmed
+                }
+            }
+        }
+
+        // Apply updates
+        println("")
+        println("┌──────────────────────────────────────────────────────────┐")
+        println("│  💾 APPLYING MEMORY UPDATES:                            │")
+        println("├──────────────────────────────────────────────────────────┤")
+
+        // Long-term memory updates
+        if (profileUpdates.isNotEmpty() || preferenceUpdates.isNotEmpty() || knowledgeUpdates.isNotEmpty()) {
+            println("│  📦 LONG-TERM:")
+            profileUpdates.forEach { (k, v) -> println("│     Profile: $k = $v") }
+            preferenceUpdates.forEach { (k, v) -> println("│     Preference: $k = $v") }
+            knowledgeUpdates.forEach { println("│     Knowledge: $it") }
+
+            memoryService.updateLongTermMemory(
+                profileUpdates = profileUpdates,
+                preferenceUpdates = preferenceUpdates,
+                newKnowledge = knowledgeUpdates
+            )
+        }
+
+        // Working memory (sub-tasks) updates
+        val working = memoryService.readWorkingMemory(currentChatId)
+
+        if (isNewTask && taskName.isNotEmpty()) {
+            // Create new task
+            println("│  📋 WORKING: New task created")
+            println("│     ⚡ NEW TASK: $taskName")
+            taskContext.forEach { println("│     Context: $it") }
+
+            memoryService.addTask(currentChatId, taskName, taskContext)
+
+        } else if (taskContext.isNotEmpty() && working.currentTask != null) {
+            // Update current task context
+            println("│  📋 WORKING: Updating current task")
+            println("│     Task: ${working.currentTask?.name}")
+            taskContext.forEach { println("│     + Context: $it") }
+
+            memoryService.updateCurrentTask(currentChatId, taskContext)
+        }
+
+        if (taskCompleted && working.currentTask != null) {
+            println("│  📋 WORKING: Task completed")
+            println("│     ✓ ${working.currentTask?.name}")
+
+            memoryService.completeTask(currentChatId)
+        }
+
+        println("└──────────────────────────────────────────────────────────┘")
     }
 
     /**
