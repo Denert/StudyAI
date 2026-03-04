@@ -43,12 +43,15 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val checkpointIndex by viewModel.checkpointIndex.collectAsState()
     val showBranchSelector by viewModel.showBranchSelector.collectAsState()
     val pendingBranchChat by viewModel.pendingBranchChat.collectAsState()
+    val profiles by viewModel.profiles.collectAsState()
+    val activeProfile by viewModel.activeProfile.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
     // Dialog states
     var showFactsDialog by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -76,6 +79,18 @@ fun ChatScreen(viewModel: ChatViewModel) {
             onUpdateFact = { key, value -> viewModel.updateFact(key, value) },
             onDeleteFact = { viewModel.deleteFact(it) },
             onDismiss = { showFactsDialog = false }
+        )
+    }
+
+    // Profile manager dialog
+    if (showProfileDialog) {
+        ProfileManagerDialog(
+            profiles = profiles,
+            activeProfile = activeProfile,
+            onSelectProfile = { viewModel.setActiveProfile(it) },
+            onCreateProfile = { viewModel.createProfile(it) },
+            onDeleteProfile = { viewModel.deleteProfile(it) },
+            onDismiss = { showProfileDialog = false }
         )
     }
 
@@ -109,7 +124,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     checkpointIndex = checkpointIndex,
                     currentChat = currentChat,
                     branchCount = currentBranchCount,
-                    onShowFacts = { showFactsDialog = true }
+                    activeProfile = activeProfile,
+                    onShowFacts = { showFactsDialog = true },
+                    onShowProfiles = { showProfileDialog = true }
                 )
             }
 
@@ -356,7 +373,7 @@ fun StrategyDropdown(
             onDismissRequest = { expanded = false },
             modifier = Modifier.widthIn(min = 220.dp)
         ) {
-            ContextStrategy.entries.forEach { strategy ->
+            ContextStrategy.entries.filter { it != ContextStrategy.NONE }.forEach { strategy ->
                 DropdownMenuItem(
                     text = {
                         Row(
@@ -410,7 +427,9 @@ fun StrategyInfoBar(
     checkpointIndex: Int?,
     currentChat: Chat?,
     branchCount: Int,
-    onShowFacts: () -> Unit
+    activeProfile: String,
+    onShowFacts: () -> Unit,
+    onShowProfiles: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -458,9 +477,10 @@ fun StrategyInfoBar(
                 }
                 ContextStrategy.MEMORY_LAYERS -> {
                     Text(
-                        "| Short-term + Working + Long-term",
+                        text = "| Profile: $activeProfile [Manage]",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.tertiary
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { onShowProfiles() }
                     )
                 }
                 else -> {}
@@ -714,6 +734,160 @@ fun FactsEditorDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ProfileManagerDialog(
+    profiles: List<String>,
+    activeProfile: String,
+    onSelectProfile: (String) -> Unit,
+    onCreateProfile: (String) -> Unit,
+    onDeleteProfile: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var newProfileName by remember { mutableStateOf("") }
+    var profileToDelete by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.widthIn(min = 300.dp, max = 400.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Manage Profiles", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Profiles store long-term memory (user data, preferences, knowledge, decisions) that applies to all chats.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                HorizontalDivider()
+
+                // Profile list
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 200.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(profiles) { profile ->
+                        val isActive = profile == activeProfile
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectProfile(profile) },
+                            color = if (isActive) MaterialTheme.colorScheme.primaryContainer
+                                   else MaterialTheme.colorScheme.secondaryContainer,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
+                                           else MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = profile,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
+                                            else MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isActive) {
+                                    Text(
+                                        text = "Active",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                if (profile != "Default") {
+                                    IconButton(
+                                        onClick = { profileToDelete = profile },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Delete profile",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                // Create new profile
+                Text("Create New Profile", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newProfileName,
+                        onValueChange = { newProfileName = it },
+                        label = { Text("Profile Name") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    IconButton(
+                        onClick = {
+                            if (newProfileName.isNotBlank()) {
+                                onCreateProfile(newProfileName)
+                                newProfileName = ""
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Create")
+                    }
+                }
+
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Close")
+                }
+            }
+        }
+    }
+
+    // Delete confirmation dialog
+    profileToDelete?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { profileToDelete = null },
+            title = { Text("Delete Profile?") },
+            text = {
+                Text("Are you sure you want to delete profile \"$profile\"? All memory data for this profile will be lost.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteProfile(profile)
+                        profileToDelete = null
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { profileToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

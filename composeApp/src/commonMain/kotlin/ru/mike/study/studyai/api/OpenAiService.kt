@@ -74,7 +74,7 @@ class OpenAiService(private val apiKey: String) {
     private val facts = mutableListOf<FactData>()
 
     // Current strategy settings
-    private var currentStrategy: ContextStrategy = ContextStrategy.NONE
+    private var currentStrategy: ContextStrategy = ContextStrategy.MEMORY_LAYERS
     private var slidingWindowSize: Int = DEFAULT_SLIDING_WINDOW_SIZE
 
     // Memory layers (for MEMORY_LAYERS strategy)
@@ -342,13 +342,15 @@ class OpenAiService(private val apiKey: String) {
             val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
 
             // Get current memory state
-            val longTerm = memoryService.readLongTermMemory()
+            val profile = memoryService.readActiveProfile()
             val working = memoryService.readWorkingMemory(currentChatId)
 
             val currentLongTermStr = buildString {
-                appendLine("Profile: ${longTerm.profile.entries.joinToString(", ") { "${it.key}=${it.value}" }}")
-                appendLine("Preferences: ${longTerm.preferences.entries.joinToString(", ") { "${it.key}=${it.value}" }}")
-                appendLine("Knowledge: ${longTerm.knowledge.joinToString("; ")}")
+                appendLine("Profile: ${profile.name}")
+                appendLine("Data: ${profile.data.entries.joinToString(", ") { "${it.key}=${it.value}" }}")
+                appendLine("Preferences: ${profile.preferences.entries.joinToString(", ") { "${it.key}=${it.value}" }}")
+                appendLine("Knowledge: ${profile.knowledge.joinToString("; ")}")
+                appendLine("Decisions: ${profile.decisions.joinToString("; ")}")
             }
 
             val currentWorkingStr = buildString {
@@ -364,7 +366,7 @@ class OpenAiService(private val apiKey: String) {
 
             val extractionPrompt = """Проанализируй последний обмен сообщениями и определи, что сохранить в память.
 
-ТЕКУЩАЯ ДОЛГОВРЕМЕННАЯ ПАМЯТЬ (глобальная):
+ТЕКУЩИЙ ПРОФИЛЬ (глобальная память):
 $currentLongTermStr
 
 ТЕКУЩАЯ РАБОЧАЯ ПАМЯТЬ (подзадачи диалога):
@@ -378,10 +380,11 @@ $lastAssistantMessage
 
 Определи:
 
-1. ДОЛГОВРЕМЕННАЯ ПАМЯТЬ (сохраняется навсегда):
-   - Профиль: имя, роль, профессия пользователя
+1. ПРОФИЛЬ (сохраняется навсегда):
+   - Данные: имя, роль, профессия пользователя
    - Предпочтения: язык, стиль общения
    - Знания: важные факты о проекте, технологиях
+   - Решения: важные решения, принятые в диалогах
 
 2. РАБОЧАЯ ПАМЯТЬ (подзадачи в диалоге):
    - Это НОВАЯ подзадача или продолжение текущей?
@@ -391,14 +394,17 @@ $lastAssistantMessage
 
 Ответь СТРОГО в формате:
 
-LONG_TERM_PROFILE:
+PROFILE_DATA:
 ключ: значение
 
-LONG_TERM_PREFERENCES:
+PROFILE_PREFERENCES:
 ключ: значение
 
-LONG_TERM_KNOWLEDGE:
+PROFILE_KNOWLEDGE:
 - факт
+
+PROFILE_DECISIONS:
+- решение
 
 NEW_TASK:
 yes/no
@@ -473,9 +479,10 @@ yes/no"""
      */
     private fun parseAndApplyMemoryUpdates(content: String) {
         var currentSection = ""
-        val profileUpdates = mutableMapOf<String, String>()
+        val dataUpdates = mutableMapOf<String, String>()
         val preferenceUpdates = mutableMapOf<String, String>()
         val knowledgeUpdates = mutableListOf<String>()
+        val decisionUpdates = mutableListOf<String>()
         var isNewTask = false
         var taskName = ""
         val taskContext = mutableListOf<String>()
@@ -484,9 +491,10 @@ yes/no"""
         content.lines().forEach { line ->
             val trimmed = line.trim()
             when {
-                trimmed.startsWith("LONG_TERM_PROFILE:") -> currentSection = "profile"
-                trimmed.startsWith("LONG_TERM_PREFERENCES:") -> currentSection = "preferences"
-                trimmed.startsWith("LONG_TERM_KNOWLEDGE:") -> currentSection = "knowledge"
+                trimmed.startsWith("PROFILE_DATA:") -> currentSection = "data"
+                trimmed.startsWith("PROFILE_PREFERENCES:") -> currentSection = "preferences"
+                trimmed.startsWith("PROFILE_KNOWLEDGE:") -> currentSection = "knowledge"
+                trimmed.startsWith("PROFILE_DECISIONS:") -> currentSection = "decisions"
                 trimmed.startsWith("NEW_TASK:") -> {
                     isNewTask = trimmed.lowercase().contains("yes")
                     currentSection = ""
@@ -501,13 +509,13 @@ yes/no"""
                     taskCompleted = trimmed.lowercase().contains("yes")
                     currentSection = ""
                 }
-                trimmed.contains(":") && currentSection in listOf("profile", "preferences") -> {
+                trimmed.contains(":") && currentSection in listOf("data", "preferences") -> {
                     val colonIdx = trimmed.indexOf(":")
                     val key = trimmed.substring(0, colonIdx).trim().trimStart('-', ' ')
                     val value = trimmed.substring(colonIdx + 1).trim()
                     if (key.isNotEmpty() && value.isNotEmpty()) {
                         when (currentSection) {
-                            "profile" -> profileUpdates[key] = value
+                            "data" -> dataUpdates[key] = value
                             "preferences" -> preferenceUpdates[key] = value
                         }
                     }
@@ -517,6 +525,7 @@ yes/no"""
                     if (item.isNotEmpty()) {
                         when (currentSection) {
                             "knowledge" -> knowledgeUpdates.add(item)
+                            "decisions" -> decisionUpdates.add(item)
                             "taskcontext" -> taskContext.add(item)
                         }
                     }
@@ -533,17 +542,20 @@ yes/no"""
         println("│  💾 APPLYING MEMORY UPDATES:                            │")
         println("├──────────────────────────────────────────────────────────┤")
 
-        // Long-term memory updates
-        if (profileUpdates.isNotEmpty() || preferenceUpdates.isNotEmpty() || knowledgeUpdates.isNotEmpty()) {
-            println("│  📦 LONG-TERM:")
-            profileUpdates.forEach { (k, v) -> println("│     Profile: $k = $v") }
+        // Profile updates
+        if (dataUpdates.isNotEmpty() || preferenceUpdates.isNotEmpty() ||
+            knowledgeUpdates.isNotEmpty() || decisionUpdates.isNotEmpty()) {
+            println("│  👤 PROFILE:")
+            dataUpdates.forEach { (k, v) -> println("│     Data: $k = $v") }
             preferenceUpdates.forEach { (k, v) -> println("│     Preference: $k = $v") }
             knowledgeUpdates.forEach { println("│     Knowledge: $it") }
+            decisionUpdates.forEach { println("│     Decision: $it") }
 
-            memoryService.updateLongTermMemory(
-                profileUpdates = profileUpdates,
+            memoryService.updateActiveProfile(
+                dataUpdates = dataUpdates,
                 preferenceUpdates = preferenceUpdates,
-                newKnowledge = knowledgeUpdates
+                newKnowledge = knowledgeUpdates,
+                newDecisions = decisionUpdates
             )
         }
 

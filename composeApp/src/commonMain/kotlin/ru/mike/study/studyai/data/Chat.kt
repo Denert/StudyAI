@@ -24,7 +24,7 @@ data class Chat(
     val branchName: String? = null,
     val branchDepth: Int = 0,
     val checkpointIndex: Int? = null,
-    val strategy: ContextStrategy = ContextStrategy.NONE,
+    val strategy: ContextStrategy = ContextStrategy.MEMORY_LAYERS,
     val slidingWindowSize: Int = 10,
     val createdAt: Long = System.currentTimeMillis(),
     val model: String = "",

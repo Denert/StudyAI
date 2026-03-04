@@ -22,9 +22,17 @@ class ChatViewModel(apiKey: String) : ViewModel() {
 
     private val openAiService = OpenAiService(apiKey)
     private val chatStorage = ChatStorage()
+    private val memoryService = openAiService.getMemoryService()
 
     private val _chats = MutableStateFlow<List<Chat>>(emptyList())
     val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
+
+    // Profiles
+    private val _profiles = MutableStateFlow<List<String>>(emptyList())
+    val profiles: StateFlow<List<String>> = _profiles.asStateFlow()
+
+    private val _activeProfile = MutableStateFlow("")
+    val activeProfile: StateFlow<String> = _activeProfile.asStateFlow()
 
     private val _currentChat = MutableStateFlow<Chat?>(null)
     val currentChat: StateFlow<Chat?> = _currentChat.asStateFlow()
@@ -42,7 +50,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     val model: StateFlow<String> = _model.asStateFlow()
 
     // Strategy
-    private val _strategy = MutableStateFlow(ContextStrategy.NONE)
+    private val _strategy = MutableStateFlow(ContextStrategy.MEMORY_LAYERS)
     val strategy: StateFlow<ContextStrategy> = _strategy.asStateFlow()
 
     private val _slidingWindowSize = MutableStateFlow(10)
@@ -67,8 +75,35 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     val pendingBranchChat: StateFlow<Chat?> = _pendingBranchChat.asStateFlow()
 
     init {
+        loadProfiles()
         loadChats()
     }
+
+    // ==================== PROFILES ====================
+
+    private fun loadProfiles() {
+        _profiles.value = memoryService.getAllProfiles()
+        _activeProfile.value = memoryService.getActiveProfileName()
+    }
+
+    fun createProfile(name: String) {
+        if (name.isBlank()) return
+        memoryService.createProfile(name)
+        loadProfiles()
+    }
+
+    fun deleteProfile(name: String) {
+        if (memoryService.deleteProfile(name)) {
+            loadProfiles()
+        }
+    }
+
+    fun setActiveProfile(name: String) {
+        memoryService.setActiveProfile(name)
+        _activeProfile.value = name
+    }
+
+    fun getProfilesList(): List<String> = _profiles.value
 
     private fun loadChats() {
         _chats.value = chatStorage.getAllChats()
@@ -142,7 +177,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         _facts.value = chat?.facts ?: emptyList()
         _model.value = chat?.model ?: ""
         _temperature.value = chat?.temperature ?: 1.0f
-        _strategy.value = chat?.strategy ?: ContextStrategy.NONE
+        _strategy.value = chat?.strategy ?: ContextStrategy.MEMORY_LAYERS
         _slidingWindowSize.value = chat?.slidingWindowSize ?: 10
         _checkpointIndex.value = null // Always start with checkbox unchecked
 
