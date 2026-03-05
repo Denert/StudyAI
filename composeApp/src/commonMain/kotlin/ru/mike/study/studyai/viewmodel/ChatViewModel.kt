@@ -13,6 +13,7 @@ import ru.mike.study.studyai.data.ChatMessage
 import ru.mike.study.studyai.data.ChatSummaryData
 import ru.mike.study.studyai.data.ContextStrategy
 import ru.mike.study.studyai.data.FactData
+import ru.mike.study.studyai.data.TaskPhase
 import ru.mike.study.studyai.data.toChatMessage
 import ru.mike.study.studyai.data.toData
 import ru.mike.study.studyai.storage.ChatStorage
@@ -74,6 +75,13 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     private val _pendingBranchChat = MutableStateFlow<Chat?>(null)
     val pendingBranchChat: StateFlow<Chat?> = _pendingBranchChat.asStateFlow()
 
+    // Task Phase FSM
+    private val _currentPhase = MutableStateFlow<TaskPhase?>(null)
+    val currentPhase: StateFlow<TaskPhase?> = _currentPhase.asStateFlow()
+
+    private val _awaitingPhaseConfirmation = MutableStateFlow(false)
+    val awaitingPhaseConfirmation: StateFlow<Boolean> = _awaitingPhaseConfirmation.asStateFlow()
+
     init {
         loadProfiles()
         loadChats()
@@ -104,6 +112,99 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     }
 
     fun getProfilesList(): List<String> = _profiles.value
+
+    /**
+     * Start a new task - enters PLANNING phase
+     */
+    fun startTask() {
+        _currentPhase.value = TaskPhase.PLANNING
+        _awaitingPhaseConfirmation.value = false
+    }
+
+    /**
+     * Mark current phase as completed, await user confirmation
+     */
+    fun completeCurrentPhase() {
+        _awaitingPhaseConfirmation.value = true
+        // Update last message to show phase completed
+        updateLastMessagePhaseCompleted()
+    }
+
+    /**
+     * User confirmed - transition to next phase
+     */
+    fun confirmPhaseTransition() {
+        _awaitingPhaseConfirmation.value = false
+        val nextPhase = getNextPhase(_currentPhase.value)
+        _currentPhase.value = nextPhase
+
+        // Clear phaseCompleted flag on last message
+        clearLastMessagePhaseCompleted()
+
+        // If task is done, reset
+        if (nextPhase == TaskPhase.DONE) {
+            // Task completed, can start new one
+        }
+    }
+
+    /**
+     * User rejected - stay in current phase or go back
+     */
+    fun rejectPhaseTransition() {
+        _awaitingPhaseConfirmation.value = false
+        clearLastMessagePhaseCompleted()
+
+        // For VALIDATION rejection, go back to EXECUTION
+        if (_currentPhase.value == TaskPhase.VALIDATION) {
+            _currentPhase.value = TaskPhase.EXECUTION
+        }
+        // Otherwise stay in current phase
+    }
+
+    /**
+     * Reset task state
+     */
+    fun resetTaskPhase() {
+        _currentPhase.value = null
+        _awaitingPhaseConfirmation.value = false
+    }
+
+    private fun getNextPhase(current: TaskPhase?): TaskPhase? {
+        return when (current) {
+            TaskPhase.PLANNING -> TaskPhase.EXECUTION
+            TaskPhase.EXECUTION -> TaskPhase.VALIDATION
+            TaskPhase.VALIDATION -> TaskPhase.DONE
+            TaskPhase.DONE -> null
+            null -> TaskPhase.PLANNING
+        }
+    }
+
+    private fun updateLastMessagePhaseCompleted() {
+        val messages = _messages.value.toMutableList()
+        if (messages.isNotEmpty()) {
+            val lastIndex = messages.lastIndex
+            val lastMsg = messages[lastIndex]
+            if (!lastMsg.isFromUser) {
+                messages[lastIndex] = lastMsg.copy(
+                    phase = _currentPhase.value,
+                    phaseCompleted = true
+                )
+                _messages.value = messages
+            }
+        }
+    }
+
+    private fun clearLastMessagePhaseCompleted() {
+        val messages = _messages.value.toMutableList()
+        if (messages.isNotEmpty()) {
+            val lastIndex = messages.lastIndex
+            val lastMsg = messages[lastIndex]
+            if (!lastMsg.isFromUser && lastMsg.phaseCompleted) {
+                messages[lastIndex] = lastMsg.copy(phaseCompleted = false)
+                _messages.value = messages
+            }
+        }
+    }
 
     private fun loadChats() {
         _chats.value = chatStorage.getAllChats()
@@ -180,6 +281,11 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         _strategy.value = chat?.strategy ?: ContextStrategy.MEMORY_LAYERS
         _slidingWindowSize.value = chat?.slidingWindowSize ?: 10
         _checkpointIndex.value = null // Always start with checkbox unchecked
+
+        // Restore phase from last message or reset
+        val lastAssistantMsg = _messages.value.lastOrNull { !it.isFromUser }
+        _currentPhase.value = lastAssistantMsg?.phase
+        _awaitingPhaseConfirmation.value = lastAssistantMsg?.phaseCompleted ?: false
 
         // Configure OpenAI service
         openAiService.setStrategy(_strategy.value)
@@ -599,9 +705,42 @@ class ChatViewModel(apiKey: String) : ViewModel() {
 
     private suspend fun extractMemoryLayersIfNeeded() {
         // Extract and update memory layers after every assistant response
-        val success = openAiService.extractMemoryUpdates(_model.value.ifBlank { null })
-        if (success) {
+        val result = openAiService.extractMemoryUpdates(_model.value.ifBlank { null })
+        if (result.success) {
             println("Context management: Memory layers updated")
+
+            // Determine phase: from LLM response or default to current/PLANNING
+            val phase = if (result.phase != null) {
+                try {
+                    TaskPhase.valueOf(result.phase)
+                } catch (e: Exception) {
+                    _currentPhase.value ?: TaskPhase.PLANNING
+                }
+            } else {
+                _currentPhase.value ?: TaskPhase.PLANNING
+            }
+
+            _currentPhase.value = phase
+
+            // Update last assistant message with phase info
+            val currentMessages = _messages.value
+            if (currentMessages.isNotEmpty()) {
+                val lastMsg = currentMessages.last()
+                if (!lastMsg.isFromUser) {
+                    val updatedMsg = lastMsg.copy(
+                        phase = phase,
+                        phaseCompleted = result.phaseCompleted
+                    )
+                    // Create new list to trigger StateFlow update
+                    _messages.value = currentMessages.dropLast(1) + updatedMsg
+
+                    if (result.phaseCompleted) {
+                        _awaitingPhaseConfirmation.value = true
+                    }
+
+                    println("Context management: Updated message with Phase = $phase, completed = ${result.phaseCompleted}")
+                }
+            }
         }
     }
 

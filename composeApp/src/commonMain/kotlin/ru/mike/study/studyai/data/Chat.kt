@@ -12,6 +12,18 @@ enum class ContextStrategy {
     MEMORY_LAYERS   // 3-layer memory: short-term, working, long-term
 }
 
+/**
+ * Task phase for finite state machine (serializable version)
+ * Flow: PLANNING → EXECUTION → VALIDATION → DONE
+ */
+@Serializable
+enum class TaskPhaseData {
+    PLANNING,
+    EXECUTION,
+    VALIDATION,
+    DONE
+}
+
 @Serializable
 data class Chat(
     val id: String,
@@ -76,7 +88,9 @@ data class ChatMessageData(
     val content: String,
     val isFromUser: Boolean,
     val timestamp: Long = System.currentTimeMillis(),
-    val metadata: MessageMetadataData? = null
+    val metadata: MessageMetadataData? = null,
+    val phase: TaskPhaseData? = null,
+    val phaseCompleted: Boolean = false
 )
 
 @Serializable
@@ -104,7 +118,9 @@ fun ChatMessageData.toChatMessage(): ChatMessage {
                 temperature = it.temperature,
                 costRub = it.costRub
             )
-        }
+        },
+        phase = phase?.let { TaskPhase.valueOf(it.name) },
+        phaseCompleted = phaseCompleted
     )
 }
 
@@ -122,6 +138,8 @@ fun ChatMessage.toData(): ChatMessageData {
                 temperature = it.temperature,
                 costRub = it.costRub
             )
-        }
+        },
+        phase = phase?.let { TaskPhaseData.valueOf(it.name) },
+        phaseCompleted = phaseCompleted
     )
 }

@@ -102,6 +102,9 @@ class MemoryService {
     private val activeProfileFile: File
         get() = File(memoryDir, "active_profile.txt")
 
+    private val systemPromptFile: File
+        get() = File(memoryDir, "system_prompt.md")
+
     private fun profileFile(profileName: String): File {
         val safeName = profileName.replace(Regex("[^a-zA-Zа-яА-Я0-9_-]"), "_")
         return File(profilesDir, "$safeName.md")
@@ -524,6 +527,50 @@ class MemoryService {
         return memory
     }
 
+    // ==================== SYSTEM PROMPT ====================
+
+    /**
+     * Read system prompt from file. Creates default if not exists.
+     */
+    fun readSystemPrompt(): String {
+        if (!systemPromptFile.exists()) {
+            createDefaultSystemPrompt()
+        }
+        return try {
+            systemPromptFile.readText()
+        } catch (e: Exception) {
+            println("Error reading system prompt: ${e.message}")
+            ""
+        }
+    }
+
+    private fun createDefaultSystemPrompt() {
+        val defaultPrompt = """
+# System Instructions
+
+Работай по методологии: Планирование → Выполнение → Проверка → Завершение
+
+## Этапы
+
+**Планирование** - Анализ задачи и план. В конце спроси: "Переходим к выполнению?"
+
+**Выполнение** - Выполнение плана. В конце спроси: "Переходим к проверке?"
+
+**Проверка** - Проверка результатов. В конце спроси: "Задача выполнена?"
+
+**Завершение** - Итоги.
+
+Не пропускай этапы.
+""".trimIndent()
+
+        try {
+            systemPromptFile.writeText(defaultPrompt)
+            println("┃  📝 Created default system prompt: ${systemPromptFile.absolutePath}")
+        } catch (e: Exception) {
+            println("Error creating system prompt: ${e.message}")
+        }
+    }
+
     // ==================== COMBINED CONTEXT ====================
 
     /**
@@ -532,8 +579,15 @@ class MemoryService {
     fun buildMemoryContext(chatId: String): String {
         val profile = readActiveProfile()
         val working = readWorkingMemory(chatId)
+        val systemPrompt = readSystemPrompt()
 
         return buildString {
+            // System instructions first
+            if (systemPrompt.isNotBlank()) {
+                appendLine(systemPrompt)
+                appendLine()
+            }
+
             // Profile (Long-term memory)
             if (profile.data.isNotEmpty() || profile.preferences.isNotEmpty() ||
                 profile.knowledge.isNotEmpty() || profile.decisions.isNotEmpty()) {

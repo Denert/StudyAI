@@ -1,10 +1,23 @@
 package ru.mike.study.studyai.data
 
+/**
+ * Task phase for finite state machine
+ * Flow: PLANNING → EXECUTION → VALIDATION → DONE
+ */
+enum class TaskPhase {
+    PLANNING,    // Анализ и планирование задачи
+    EXECUTION,   // Выполнение плана
+    VALIDATION,  // Проверка результатов
+    DONE         // Задача завершена
+}
+
 data class ChatMessage(
     val content: String,
     val isFromUser: Boolean,
     val isLoading: Boolean = false,
-    val metadata: MessageMetadata? = null
+    val metadata: MessageMetadata? = null,
+    val phase: TaskPhase? = null,           // Текущий этап задачи
+    val phaseCompleted: Boolean = false     // Этап завершён, ждём подтверждения
 )
 
 data class MessageMetadata(

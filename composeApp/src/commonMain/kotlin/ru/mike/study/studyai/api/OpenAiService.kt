@@ -33,6 +33,12 @@ data class FactsResult(
     val tokenCount: Int
 )
 
+data class MemoryExtractionResult(
+    val success: Boolean,
+    val phase: String? = null,         // PLANNING, EXECUTION, VALIDATION, DONE
+    val phaseCompleted: Boolean = false
+)
+
 class OpenAiService(private val apiKey: String) {
 
     companion object {
@@ -295,7 +301,7 @@ class OpenAiService(private val apiKey: String) {
     private fun buildMemoryLayersContext(): List<OpenAiMessage> {
         val contextMessages = mutableListOf<OpenAiMessage>()
 
-        // Build memory context from long-term and working memory
+        // Build memory context from long-term and working memory (includes system instructions)
         val memoryContext = memoryService.buildMemoryContext(currentChatId)
 
         if (memoryContext.isNotBlank()) {
@@ -328,15 +334,18 @@ class OpenAiService(private val apiKey: String) {
     /**
      * Extract and update memory layers from conversation
      * Called after each assistant response
+     * Returns phase information for FSM
      */
-    suspend fun extractMemoryUpdates(model: String? = null): Boolean {
+    suspend fun extractMemoryUpdates(model: String? = null): MemoryExtractionResult {
         if (currentChatId.isEmpty()) {
             println("⚠ Cannot extract memory: no chat ID set")
-            return false
+            return MemoryExtractionResult(success = false)
         }
 
-        val lastUserMessage = allMessages.lastOrNull { it.role == "user" }?.content ?: return false
-        val lastAssistantMessage = allMessages.lastOrNull { it.role == "assistant" }?.content ?: return false
+        val lastUserMessage = allMessages.lastOrNull { it.role == "user" }?.content
+            ?: return MemoryExtractionResult(success = false)
+        val lastAssistantMessage = allMessages.lastOrNull { it.role == "assistant" }?.content
+            ?: return MemoryExtractionResult(success = false)
 
         return try {
             val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
@@ -392,6 +401,14 @@ $lastAssistantMessage
    - Контекст подзадачи (ключевые решения, артефакты)
    - Текущая подзадача ЗАВЕРШЕНА?
 
+3. ФАЗА ЗАДАЧИ (конечный автомат):
+   - PLANNING: анализ, планирование, исследование
+   - EXECUTION: реализация, написание кода, выполнение
+   - VALIDATION: проверка, тестирование, ревью
+   - DONE: задача завершена
+
+   Определи текущую фазу и завершена ли она.
+
 Ответь СТРОГО в формате:
 
 PROFILE_DATA:
@@ -416,6 +433,12 @@ TASK_CONTEXT:
 - ключевое решение или факт
 
 TASK_COMPLETED:
+yes/no
+
+TASK_PHASE:
+PLANNING/EXECUTION/VALIDATION/DONE
+
+PHASE_COMPLETED:
 yes/no"""
 
             val request = OpenAiRequest(
@@ -447,10 +470,11 @@ yes/no"""
 
             if (response.error != null) {
                 println("┃  ❌ Memory extraction error: ${response.error.message}")
-                return false
+                return MemoryExtractionResult(success = false)
             }
 
-            val content = response.choices?.firstOrNull()?.message?.content ?: return false
+            val content = response.choices?.firstOrNull()?.message?.content
+                ?: return MemoryExtractionResult(success = false)
 
             println("")
             println("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
@@ -464,20 +488,25 @@ yes/no"""
             }
             println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
 
-            // Parse and apply memory updates
-            parseAndApplyMemoryUpdates(content)
+            // Parse and apply memory updates, get phase info
+            val phaseResult = parseAndApplyMemoryUpdates(content)
 
-            true
+            MemoryExtractionResult(
+                success = true,
+                phase = phaseResult.first,
+                phaseCompleted = phaseResult.second
+            )
         } catch (e: Exception) {
             println("Memory extraction failed: ${e.message}")
-            false
+            MemoryExtractionResult(success = false)
         }
     }
 
     /**
      * Parse LLM response and update memory layers
+     * Returns Pair(phase, phaseCompleted)
      */
-    private fun parseAndApplyMemoryUpdates(content: String) {
+    private fun parseAndApplyMemoryUpdates(content: String): Pair<String?, Boolean> {
         var currentSection = ""
         val dataUpdates = mutableMapOf<String, String>()
         val preferenceUpdates = mutableMapOf<String, String>()
@@ -487,6 +516,16 @@ yes/no"""
         var taskName = ""
         val taskContext = mutableListOf<String>()
         var taskCompleted = false
+
+        // Parse TASK_PHASE using regex for reliability
+        val phaseRegex = Regex("""TASK_PHASE:\s*(PLANNING|EXECUTION|VALIDATION|DONE)""", RegexOption.IGNORE_CASE)
+        val taskPhase = phaseRegex.find(content)?.groupValues?.get(1)?.uppercase()
+
+        // Parse PHASE_COMPLETED using regex
+        val phaseCompletedRegex = Regex("""PHASE_COMPLETED:\s*(yes|no)""", RegexOption.IGNORE_CASE)
+        val phaseCompleted = phaseCompletedRegex.find(content)?.groupValues?.get(1)?.lowercase() == "yes"
+
+        println("┃  🔍 Parsed TASK_PHASE: $taskPhase, PHASE_COMPLETED: $phaseCompleted")
 
         content.lines().forEach { line ->
             val trimmed = line.trim()
@@ -509,6 +548,8 @@ yes/no"""
                     taskCompleted = trimmed.lowercase().contains("yes")
                     currentSection = ""
                 }
+                trimmed.startsWith("TASK_PHASE:") -> currentSection = ""
+                trimmed.startsWith("PHASE_COMPLETED:") -> currentSection = ""
                 trimmed.contains(":") && currentSection in listOf("data", "preferences") -> {
                     val colonIdx = trimmed.indexOf(":")
                     val key = trimmed.substring(0, colonIdx).trim().trimStart('-', ' ')
@@ -586,7 +627,14 @@ yes/no"""
             memoryService.completeTask(currentChatId)
         }
 
+        // Phase info
+        if (taskPhase != null) {
+            println("│  🔄 PHASE: $taskPhase ${if (phaseCompleted) "✓ COMPLETED" else ""}")
+        }
+
         println("└──────────────────────────────────────────────────────────┘")
+
+        return Pair(taskPhase, phaseCompleted)
     }
 
     /**

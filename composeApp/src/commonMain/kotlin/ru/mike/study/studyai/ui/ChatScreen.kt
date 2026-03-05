@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
@@ -27,6 +28,7 @@ import ru.mike.study.studyai.data.Chat
 import ru.mike.study.studyai.data.ChatMessage
 import ru.mike.study.studyai.data.ContextStrategy
 import ru.mike.study.studyai.data.FactData
+import ru.mike.study.studyai.data.TaskPhase
 import ru.mike.study.studyai.viewmodel.ChatViewModel
 
 @Composable
@@ -45,6 +47,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val pendingBranchChat by viewModel.pendingBranchChat.collectAsState()
     val profiles by viewModel.profiles.collectAsState()
     val activeProfile by viewModel.activeProfile.collectAsState()
+    val currentPhase by viewModel.currentPhase.collectAsState()
+    val awaitingPhaseConfirmation by viewModel.awaitingPhaseConfirmation.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -141,8 +145,15 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(vertical = 16.dp)
                 ) {
-                    items(messages) { message ->
-                        ChatMessageItem(message)
+                    itemsIndexed(
+                        items = messages,
+                        key = { index, _ -> index }
+                    ) { _, message ->
+                        ChatMessageItem(
+                            message = message,
+                            onConfirmPhase = { viewModel.confirmPhaseTransition() },
+                            onRejectPhase = { viewModel.rejectPhaseTransition() }
+                        )
                     }
                 }
             }
@@ -1090,7 +1101,11 @@ fun ChatListItem(
 }
 
 @Composable
-fun ChatMessageItem(message: ChatMessage) {
+fun ChatMessageItem(
+    message: ChatMessage,
+    onConfirmPhase: () -> Unit = {},
+    onRejectPhase: () -> Unit = {}
+) {
     val backgroundColor = if (message.isFromUser) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
@@ -1101,6 +1116,7 @@ fun ChatMessageItem(message: ChatMessage) {
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (message.isFromUser) Alignment.End else Alignment.Start
     ) {
+
         Box(
             modifier = Modifier
                 .widthIn(max = 400.dp)
@@ -1143,6 +1159,7 @@ fun ChatMessageItem(message: ChatMessage) {
             }
         }
 
+
         if (message.isFromUser) {
             val estimatedTokens = (message.content.length / 2.5).toInt().coerceAtLeast(1)
             Text(
@@ -1159,6 +1176,97 @@ fun ChatMessageItem(message: ChatMessage) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp)
             )
+        }
+    }
+}
+
+@Composable
+fun PhaseStatusBadge(phase: TaskPhase, isCompleted: Boolean) {
+    val (icon, color, text) = when (phase) {
+        TaskPhase.PLANNING -> Triple(
+            Icons.Default.Description,
+            MaterialTheme.colorScheme.primary,
+            "PLANNING"
+        )
+        TaskPhase.EXECUTION -> Triple(
+            Icons.Default.Build,
+            MaterialTheme.colorScheme.tertiary,
+            "EXECUTION"
+        )
+        TaskPhase.VALIDATION -> Triple(
+            Icons.Default.CheckCircle,
+            MaterialTheme.colorScheme.secondary,
+            "VALIDATION"
+        )
+        TaskPhase.DONE -> Triple(
+            Icons.Default.Done,
+            MaterialTheme.colorScheme.primary,
+            "DONE"
+        )
+    }
+
+    Surface(
+        color = color.copy(alpha = 0.15f),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = color,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = if (isCompleted) "$text ✓" else text,
+                style = MaterialTheme.typography.labelSmall,
+                color = color
+            )
+        }
+    }
+}
+
+@Composable
+fun PhaseConfirmationButtons(
+    phase: TaskPhase?,
+    onConfirm: () -> Unit,
+    onReject: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            IconButton(
+                onClick = onConfirm,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Confirm",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            IconButton(
+                onClick = onReject,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Reject",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
