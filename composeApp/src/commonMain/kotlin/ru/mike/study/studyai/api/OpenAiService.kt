@@ -36,7 +36,8 @@ data class FactsResult(
 data class MemoryExtractionResult(
     val success: Boolean,
     val phase: String? = null,         // PLANNING, EXECUTION, VALIDATION, DONE
-    val phaseCompleted: Boolean = false
+    val phaseCompleted: Boolean = false,
+    val invariants: List<String> = emptyList()
 )
 
 class OpenAiService(private val apiKey: String) {
@@ -409,6 +410,11 @@ $lastAssistantMessage
 
    Определи текущую фазу и завершена ли она.
 
+4. ИНВАРИАНТЫ (правила, которые ВСЕГДА должны соблюдаться):
+   - Если пользователь явно указал правило/ограничение - запиши его
+   - Примеры: "всегда использовать TypeScript", "не добавлять новые зависимости", "код должен быть на русском"
+   - Записывай только явные указания пользователя
+
 Ответь СТРОГО в формате:
 
 PROFILE_DATA:
@@ -439,7 +445,10 @@ TASK_PHASE:
 PLANNING/EXECUTION/VALIDATION/DONE
 
 PHASE_COMPLETED:
-yes/no"""
+yes/no
+
+INVARIANTS:
+- правило (если есть новые)"""
 
             val request = OpenAiRequest(
                 model = requestModel,
@@ -489,12 +498,13 @@ yes/no"""
             println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
 
             // Parse and apply memory updates, get phase info
-            val phaseResult = parseAndApplyMemoryUpdates(content)
+            val parseResult = parseAndApplyMemoryUpdates(content)
 
             MemoryExtractionResult(
                 success = true,
-                phase = phaseResult.first,
-                phaseCompleted = phaseResult.second
+                phase = parseResult.phase,
+                phaseCompleted = parseResult.phaseCompleted,
+                invariants = parseResult.invariants
             )
         } catch (e: Exception) {
             println("Memory extraction failed: ${e.message}")
@@ -503,15 +513,24 @@ yes/no"""
     }
 
     /**
-     * Parse LLM response and update memory layers
-     * Returns Pair(phase, phaseCompleted)
+     * Parse result for memory updates
      */
-    private fun parseAndApplyMemoryUpdates(content: String): Pair<String?, Boolean> {
+    data class ParseResult(
+        val phase: String?,
+        val phaseCompleted: Boolean,
+        val invariants: List<String>
+    )
+
+    /**
+     * Parse LLM response and update memory layers
+     */
+    private fun parseAndApplyMemoryUpdates(content: String): ParseResult {
         var currentSection = ""
         val dataUpdates = mutableMapOf<String, String>()
         val preferenceUpdates = mutableMapOf<String, String>()
         val knowledgeUpdates = mutableListOf<String>()
         val decisionUpdates = mutableListOf<String>()
+        val invariantUpdates = mutableListOf<String>()
         var isNewTask = false
         var taskName = ""
         val taskContext = mutableListOf<String>()
@@ -550,6 +569,7 @@ yes/no"""
                 }
                 trimmed.startsWith("TASK_PHASE:") -> currentSection = ""
                 trimmed.startsWith("PHASE_COMPLETED:") -> currentSection = ""
+                trimmed.startsWith("INVARIANTS:") -> currentSection = "invariants"
                 trimmed.contains(":") && currentSection in listOf("data", "preferences") -> {
                     val colonIdx = trimmed.indexOf(":")
                     val key = trimmed.substring(0, colonIdx).trim().trimStart('-', ' ')
@@ -568,6 +588,7 @@ yes/no"""
                             "knowledge" -> knowledgeUpdates.add(item)
                             "decisions" -> decisionUpdates.add(item)
                             "taskcontext" -> taskContext.add(item)
+                            "invariants" -> invariantUpdates.add(item)
                         }
                     }
                 }
@@ -632,9 +653,18 @@ yes/no"""
             println("│  🔄 PHASE: $taskPhase ${if (phaseCompleted) "✓ COMPLETED" else ""}")
         }
 
+        // Invariants
+        if (invariantUpdates.isNotEmpty()) {
+            println("│  📌 INVARIANTS:")
+            invariantUpdates.forEach { invariant ->
+                println("│     + $invariant")
+                memoryService.addAutoInvariant(invariant)
+            }
+        }
+
         println("└──────────────────────────────────────────────────────────┘")
 
-        return Pair(taskPhase, phaseCompleted)
+        return ParseResult(taskPhase, phaseCompleted, invariantUpdates)
     }
 
     /**
