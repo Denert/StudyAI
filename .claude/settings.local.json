@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "mcp__ide__getDiagnostics",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:help.figma.com)",
+      "WebFetch(domain:developers.figma.com)",
+      "Bash(find:*)"
     ]
   }
 }

@@ -15,7 +15,9 @@ import ru.mike.study.studyai.data.MessageMetadata
 import ru.mike.study.studyai.data.OpenAiMessage
 import ru.mike.study.studyai.data.OpenAiRequest
 import ru.mike.study.studyai.data.OpenAiResponse
+import ru.mike.study.studyai.data.OpenAiTool
 import ru.mike.study.studyai.data.PricingCalculator
+import ru.mike.study.studyai.data.ToolCall
 import ru.mike.study.studyai.memory.MemoryService
 
 data class ChatResult(
@@ -827,7 +829,7 @@ ${lastUserMessage.content}
             println("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
             println("┃  USER MESSAGE:")
             println("┃  ──────────────")
-            lastUserMessage.content.lines().forEach { line ->
+            lastUserMessage.content?.lines()?.forEach { line ->
                 println("┃  $line")
             }
             println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
@@ -931,4 +933,222 @@ ${lastUserMessage.content}
     fun getSummariesCount(): Int = summaries.size
 
     fun getFactsCount(): Int = facts.size
+
+    // ==================== TOOLS SUPPORT ====================
+
+    /**
+     * Send message with MCP tools support
+     * Returns either a final response or a tool call request
+     */
+    suspend fun sendMessageWithTools(
+        userMessage: String,
+        tools: List<OpenAiTool>,
+        temperature: Float = 1.0f,
+        model: String? = null
+    ): Result<ChatResultWithTools> {
+        return try {
+            allMessages.add(OpenAiMessage(role = "user", content = userMessage))
+
+            val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
+            val contextMessages = buildContextMessages()
+
+            val request = OpenAiRequest(
+                model = requestModel,
+                messages = contextMessages,
+                temperature = temperature,
+                tools = if (tools.isNotEmpty()) tools else null,
+                toolChoice = if (tools.isNotEmpty()) "auto" else null
+            )
+
+            println("═══════════════════════════════════════════════════════════")
+            println("OpenAI Request with Tools (${tools.size} tools):")
+            println("═══════════════════════════════════════════════════════════")
+
+            val startTime = System.currentTimeMillis()
+
+            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+                setBody(request)
+            }
+
+            val responseTimeMs = System.currentTimeMillis() - startTime
+            val responseText = httpResponse.bodyAsText()
+
+            println("───────────────────────────────────────────────────────────")
+            println("OpenAI Response (${responseTimeMs}ms):")
+            println("───────────────────────────────────────────────────────────")
+
+            val response = json.decodeFromString<OpenAiResponse>(responseText)
+
+            if (response.error != null) {
+                allMessages.removeAt(allMessages.lastIndex)
+                return Result.failure(Exception("API Error: ${response.error.message}"))
+            }
+
+            val choice = response.choices?.firstOrNull()
+            val message = choice?.message
+            val finishReason = choice?.finishReason
+
+            val modelName = response.model ?: requestModel
+            val promptTokens = response.usage?.promptTokens ?: 0
+            val completionTokens = response.usage?.completionTokens ?: 0
+
+            val metadata = MessageMetadata(
+                model = modelName,
+                promptTokens = promptTokens,
+                completionTokens = completionTokens,
+                totalTokens = response.usage?.totalTokens ?: 0,
+                responseTimeMs = responseTimeMs,
+                temperature = temperature,
+                costRub = PricingCalculator.calculateCostRub(modelName, promptTokens, completionTokens)
+            )
+
+            // Check if there are tool calls
+            if (finishReason == "tool_calls" && message?.toolCalls != null) {
+                println("🔧 Tool calls requested: ${message.toolCalls.map { it.function.name }}")
+
+                // Add assistant message with tool calls to history
+                allMessages.add(message)
+
+                Result.success(ChatResultWithTools(
+                    content = message.content,
+                    metadata = metadata,
+                    toolCalls = message.toolCalls,
+                    isToolCall = true
+                ))
+            } else {
+                val content = message?.content ?: "No response received"
+                allMessages.add(OpenAiMessage(role = "assistant", content = content))
+
+                Result.success(ChatResultWithTools(
+                    content = content,
+                    metadata = metadata,
+                    toolCalls = null,
+                    isToolCall = false
+                ))
+            }
+        } catch (e: Exception) {
+            println("OpenAI Error: ${e.message}")
+            e.printStackTrace()
+            if (allMessages.isNotEmpty()) {
+                allMessages.removeAt(allMessages.lastIndex)
+            }
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Continue conversation after tool call with tool results
+     */
+    suspend fun continueWithToolResults(
+        toolResults: List<ToolResult>,
+        temperature: Float = 1.0f,
+        model: String? = null
+    ): Result<ChatResultWithTools> {
+        return try {
+            val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
+
+            // Add tool result messages
+            for (result in toolResults) {
+                allMessages.add(OpenAiMessage(
+                    role = "tool",
+                    content = result.content,
+                    toolCallId = result.toolCallId
+                ))
+            }
+
+            val contextMessages = buildContextMessages()
+
+            val request = OpenAiRequest(
+                model = requestModel,
+                messages = contextMessages,
+                temperature = temperature
+            )
+
+            println("═══════════════════════════════════════════════════════════")
+            println("OpenAI Continue with Tool Results (${toolResults.size} results):")
+            println("═══════════════════════════════════════════════════════════")
+
+            val startTime = System.currentTimeMillis()
+
+            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+                setBody(request)
+            }
+
+            val responseTimeMs = System.currentTimeMillis() - startTime
+            val responseText = httpResponse.bodyAsText()
+
+            val response = json.decodeFromString<OpenAiResponse>(responseText)
+
+            if (response.error != null) {
+                return Result.failure(Exception("API Error: ${response.error.message}"))
+            }
+
+            val choice = response.choices?.firstOrNull()
+            val message = choice?.message
+            val finishReason = choice?.finishReason
+
+            val modelName = response.model ?: requestModel
+            val promptTokens = response.usage?.promptTokens ?: 0
+            val completionTokens = response.usage?.completionTokens ?: 0
+
+            val metadata = MessageMetadata(
+                model = modelName,
+                promptTokens = promptTokens,
+                completionTokens = completionTokens,
+                totalTokens = response.usage?.totalTokens ?: 0,
+                responseTimeMs = responseTimeMs,
+                temperature = temperature,
+                costRub = PricingCalculator.calculateCostRub(modelName, promptTokens, completionTokens)
+            )
+
+            // Check if there are more tool calls
+            if (finishReason == "tool_calls" && message?.toolCalls != null) {
+                println("🔧 More tool calls requested: ${message.toolCalls.map { it.function.name }}")
+                allMessages.add(message)
+
+                Result.success(ChatResultWithTools(
+                    content = message.content,
+                    metadata = metadata,
+                    toolCalls = message.toolCalls,
+                    isToolCall = true
+                ))
+            } else {
+                val content = message?.content ?: "No response received"
+                allMessages.add(OpenAiMessage(role = "assistant", content = content))
+
+                Result.success(ChatResultWithTools(
+                    content = content,
+                    metadata = metadata,
+                    toolCalls = null,
+                    isToolCall = false
+                ))
+            }
+        } catch (e: Exception) {
+            println("OpenAI Error: ${e.message}")
+            e.printStackTrace()
+            Result.failure(e)
+        }
+    }
 }
+
+/**
+ * Chat result that may contain tool calls
+ */
+data class ChatResultWithTools(
+    val content: String?,
+    val metadata: MessageMetadata,
+    val toolCalls: List<ToolCall>?,
+    val isToolCall: Boolean
+)
+
+/**
+ * Tool execution result
+ */
+data class ToolResult(
+    val toolCallId: String,
+    val content: String
+)

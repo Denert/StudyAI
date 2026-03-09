@@ -2,12 +2,18 @@ package ru.mike.study.studyai
 
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import ru.mike.study.studyai.mcp.McpLogger
 
-fun main() = application {
-    Window(
-        onCloseRequest = ::exitApplication,
-        title = "StudyAI",
-    ) {
-        App()
+fun main() {
+    // Initialize MCP logger (clears old logs)
+    McpLogger.init()
+
+    application {
+        Window(
+            onCloseRequest = ::exitApplication,
+            title = "StudyAI",
+        ) {
+            App()
+        }
     }
 }

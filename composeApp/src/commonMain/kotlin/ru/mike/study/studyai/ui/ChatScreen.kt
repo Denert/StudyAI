@@ -29,6 +29,8 @@ import ru.mike.study.studyai.data.ChatMessage
 import ru.mike.study.studyai.data.ContextStrategy
 import ru.mike.study.studyai.data.FactData
 import ru.mike.study.studyai.data.TaskPhase
+import ru.mike.study.studyai.mcp.McpServersScreen
+import ru.mike.study.studyai.mcp.McpViewModel
 import ru.mike.study.studyai.viewmodel.ChatViewModel
 
 @Composable
@@ -56,6 +58,10 @@ fun ChatScreen(viewModel: ChatViewModel) {
     // Dialog states
     var showFactsDialog by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showMcpDialog by remember { mutableStateOf(false) }
+
+    // MCP ViewModel
+    val mcpViewModel = remember { McpViewModel() }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -96,6 +102,24 @@ fun ChatScreen(viewModel: ChatViewModel) {
             onDeleteProfile = { viewModel.deleteProfile(it) },
             onDismiss = { showProfileDialog = false }
         )
+    }
+
+    // MCP servers dialog
+    if (showMcpDialog) {
+        Dialog(onDismissRequest = { showMcpDialog = false }) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.9f)
+                    .fillMaxHeight(0.8f),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                McpServersScreen(
+                    viewModel = mcpViewModel,
+                    onClose = { showMcpDialog = false }
+                )
+            }
+        }
     }
 
     Row(modifier = Modifier.fillMaxSize()) {
@@ -241,6 +265,18 @@ fun ChatScreen(viewModel: ChatViewModel) {
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
+                        }
+
+                        // MCP button
+                        IconButton(
+                            onClick = { showMcpDialog = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Extension,
+                                contentDescription = "MCP Серверы",
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
 

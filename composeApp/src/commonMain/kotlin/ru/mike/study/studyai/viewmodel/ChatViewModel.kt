@@ -6,8 +6,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import ru.mike.study.studyai.api.OpenAiService
+import ru.mike.study.studyai.api.ToolResult
 import ru.mike.study.studyai.data.Chat
+import ru.mike.study.studyai.data.OpenAiFunction
+import ru.mike.study.studyai.data.OpenAiTool
+import ru.mike.study.studyai.data.ToolCall
 import ru.mike.study.studyai.data.ChatBranch
 import ru.mike.study.studyai.data.ChatMessage
 import ru.mike.study.studyai.data.ChatSummaryData
@@ -16,6 +22,8 @@ import ru.mike.study.studyai.data.FactData
 import ru.mike.study.studyai.data.TaskPhase
 import ru.mike.study.studyai.data.toChatMessage
 import ru.mike.study.studyai.data.toData
+import ru.mike.study.studyai.mcp.McpManager
+import ru.mike.study.studyai.mcp.McpLogger
 import ru.mike.study.studyai.storage.ChatStorage
 import java.util.UUID
 
@@ -24,6 +32,9 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     private val openAiService = OpenAiService(apiKey)
     private val chatStorage = ChatStorage()
     private val memoryService = openAiService.getMemoryService()
+    private val mcpManager = McpManager()
+
+    private val json = Json { ignoreUnknownKeys = true }
 
     private val _chats = MutableStateFlow<List<Chat>>(emptyList())
     val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
@@ -636,35 +647,107 @@ class ChatViewModel(apiKey: String) : ViewModel() {
             val loadingMessage = ChatMessage(content = "", isFromUser = false, isLoading = true)
             _messages.value = _messages.value + loadingMessage
 
-            val result = openAiService.sendMessage(text, _temperature.value, _model.value.ifBlank { null })
-
-            _messages.value = _messages.value.dropLast(1)
-
-            result.fold(
-                onSuccess = { chatResult ->
-                    val aiMessage = ChatMessage(
-                        content = chatResult.content,
-                        isFromUser = false,
-                        metadata = chatResult.metadata
+            try {
+                // Connect to MCP servers and get tools
+                mcpManager.connectAll()
+                val mcpTools = mcpManager.getAllTools()
+                val openAiTools = mcpTools.map { toolWithServer ->
+                    OpenAiTool(
+                        function = OpenAiFunction(
+                            name = toolWithServer.tool.name,
+                            description = toolWithServer.tool.description,
+                            parameters = toolWithServer.tool.inputSchema
+                        )
                     )
-                    _messages.value = _messages.value + aiMessage
-
-                    // Strategy-specific post-processing
-                    when (_strategy.value) {
-                        ContextStrategy.SUMMARY -> checkAndSummarizeIfNeeded()
-                        ContextStrategy.STICKY_FACTS -> extractFactsIfNeeded()
-                        ContextStrategy.MEMORY_LAYERS -> extractMemoryLayersIfNeeded()
-                        else -> { /* No post-processing */ }
-                    }
-                },
-                onFailure = { error ->
-                    val errorMessage = ChatMessage(
-                        content = "Error: ${error.message ?: "Unknown error"}",
-                        isFromUser = false
-                    )
-                    _messages.value = _messages.value + errorMessage
                 }
-            )
+
+                McpLogger.log("Sending message with ${openAiTools.size} MCP tools")
+
+                // Send message with tools
+                var result = openAiService.sendMessageWithTools(
+                    text,
+                    openAiTools,
+                    _temperature.value,
+                    _model.value.ifBlank { null }
+                )
+
+                // Handle tool calls loop
+                while (result.isSuccess && result.getOrNull()?.isToolCall == true) {
+                    val chatResult = result.getOrNull()!!
+                    val toolCalls = chatResult.toolCalls ?: break
+
+                    McpLogger.log("Processing ${toolCalls.size} tool calls")
+
+                    // Execute each tool call
+                    val toolResults = mutableListOf<ToolResult>()
+                    for (toolCall in toolCalls) {
+                        val toolName = toolCall.function.name
+                        val arguments = try {
+                            json.decodeFromString<JsonObject>(toolCall.function.arguments)
+                        } catch (e: Exception) {
+                            null
+                        }
+
+                        McpLogger.log("Executing tool: $toolName")
+
+                        val toolResult = mcpManager.callTool(toolName, arguments)
+
+                        val resultContent = toolResult.fold(
+                            onSuccess = { it.content.firstOrNull()?.text ?: "Success" },
+                            onFailure = { "Error: ${it.message}" }
+                        )
+
+                        toolResults.add(ToolResult(
+                            toolCallId = toolCall.id,
+                            content = resultContent
+                        ))
+
+                        McpLogger.log("Tool $toolName result: ${resultContent.take(100)}")
+                    }
+
+                    // Continue conversation with tool results
+                    result = openAiService.continueWithToolResults(
+                        toolResults,
+                        _temperature.value,
+                        _model.value.ifBlank { null }
+                    )
+                }
+
+                _messages.value = _messages.value.dropLast(1)
+
+                result.fold(
+                    onSuccess = { chatResult ->
+                        val aiMessage = ChatMessage(
+                            content = chatResult.content ?: "",
+                            isFromUser = false,
+                            metadata = chatResult.metadata
+                        )
+                        _messages.value = _messages.value + aiMessage
+
+                        // Strategy-specific post-processing
+                        when (_strategy.value) {
+                            ContextStrategy.SUMMARY -> checkAndSummarizeIfNeeded()
+                            ContextStrategy.STICKY_FACTS -> extractFactsIfNeeded()
+                            ContextStrategy.MEMORY_LAYERS -> extractMemoryLayersIfNeeded()
+                            else -> { /* No post-processing */ }
+                        }
+                    },
+                    onFailure = { error ->
+                        val errorMessage = ChatMessage(
+                            content = "Error: ${error.message ?: "Unknown error"}",
+                            isFromUser = false
+                        )
+                        _messages.value = _messages.value + errorMessage
+                    }
+                )
+            } catch (e: Exception) {
+                _messages.value = _messages.value.dropLast(1)
+                val errorMessage = ChatMessage(
+                    content = "Error: ${e.message ?: "Unknown error"}",
+                    isFromUser = false
+                )
+                _messages.value = _messages.value + errorMessage
+            }
 
             _isLoading.value = false
             saveCurrentChat()
