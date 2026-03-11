@@ -24,6 +24,7 @@ import ru.mike.study.studyai.data.toChatMessage
 import ru.mike.study.studyai.data.toData
 import ru.mike.study.studyai.mcp.McpManager
 import ru.mike.study.studyai.mcp.McpLogger
+import ru.mike.study.studyai.mcp.WeatherNotificationClient
 import ru.mike.study.studyai.storage.ChatStorage
 import java.util.UUID
 
@@ -33,6 +34,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     private val chatStorage = ChatStorage()
     private val memoryService = openAiService.getMemoryService()
     private val mcpManager = McpManager()
+    private val weatherNotificationClient = WeatherNotificationClient()
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -96,6 +98,34 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     init {
         loadProfiles()
         loadChats()
+        initWeatherNotifications()
+    }
+
+    private fun initWeatherNotifications() {
+        // Connect to WebSocket server for weather notifications
+        weatherNotificationClient.connect(scope = viewModelScope)
+
+        // Listen for notifications and add them to chat
+        viewModelScope.launch {
+            weatherNotificationClient.notifications.collect { notification ->
+                if (notification.type == "weather") {
+                    addSystemMessage(notification.message)
+                }
+            }
+        }
+    }
+
+    /**
+     * Add a system notification message to the current chat
+     */
+    private fun addSystemMessage(content: String) {
+        val systemMessage = ChatMessage(
+            content = content,
+            isFromUser = false,
+            isSystemNotification = true
+        )
+        _messages.value = _messages.value + systemMessage
+        saveCurrentChat()
     }
 
     // ==================== PROFILES ====================

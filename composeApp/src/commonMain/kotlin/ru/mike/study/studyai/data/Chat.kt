@@ -90,7 +90,8 @@ data class ChatMessageData(
     val timestamp: Long = System.currentTimeMillis(),
     val metadata: MessageMetadataData? = null,
     val phase: TaskPhaseData? = null,
-    val phaseCompleted: Boolean = false
+    val phaseCompleted: Boolean = false,
+    val isSystemNotification: Boolean = false
 )
 
 @Serializable
@@ -120,7 +121,8 @@ fun ChatMessageData.toChatMessage(): ChatMessage {
             )
         },
         phase = phase?.let { TaskPhase.valueOf(it.name) },
-        phaseCompleted = phaseCompleted
+        phaseCompleted = phaseCompleted,
+        isSystemNotification = isSystemNotification
     )
 }
 
@@ -140,6 +142,7 @@ fun ChatMessage.toData(): ChatMessageData {
             )
         },
         phase = phase?.let { TaskPhaseData.valueOf(it.name) },
-        phaseCompleted = phaseCompleted
+        phaseCompleted = phaseCompleted,
+        isSystemNotification = isSystemNotification
     )
 }

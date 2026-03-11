@@ -17,7 +17,8 @@ data class ChatMessage(
     val isLoading: Boolean = false,
     val metadata: MessageMetadata? = null,
     val phase: TaskPhase? = null,           // Текущий этап задачи
-    val phaseCompleted: Boolean = false     // Этап завершён, ждём подтверждения
+    val phaseCompleted: Boolean = false,    // Этап завершён, ждём подтверждения
+    val isSystemNotification: Boolean = false // Системное уведомление (погода и т.д.)
 )
 
 data class MessageMetadata(

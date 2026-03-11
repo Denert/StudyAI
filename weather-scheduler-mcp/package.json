@@ -1,0 +1,14 @@
+{
+  "name": "weather-scheduler-mcp",
+  "version": "1.0.0",
+  "description": "MCP server with scheduled weather notifications via WebSocket",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ws": "^8.16.0"
+  }
+}

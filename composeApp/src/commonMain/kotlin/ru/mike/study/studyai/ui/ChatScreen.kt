@@ -1142,6 +1142,39 @@ fun ChatMessageItem(
     onConfirmPhase: () -> Unit = {},
     onRejectPhase: () -> Unit = {}
 ) {
+    // System notification (weather, etc.) - centered with special styling
+    if (message.isSystemNotification) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 350.dp)
+                    .padding(vertical = 8.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = RoundedCornerShape(12.dp),
+                tonalElevation = 2.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
+            Text(
+                text = "Auto notification",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        return
+    }
+
     val backgroundColor = if (message.isFromUser) {
         MaterialTheme.colorScheme.primaryContainer
     } else {

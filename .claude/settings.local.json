@@ -10,7 +10,9 @@
       "Bash(npm install:*)",
       "Bash(timeout 5 node:*)",
       "Bash({ echo '{\"\"\"\"jsonrpc\"\"\"\":\"\"\"\"2.0\"\"\"\",\"\"\"\"id\"\"\"\":1,\"\"\"\"method\"\"\"\":\"\"\"\"initialize\"\"\"\",\"\"\"\"params\"\"\"\":{\"\"\"\"protocolVersion\"\"\"\":\"\"\"\"2024-11-05\"\"\"\",\"\"\"\"capabilities\"\"\"\":{},\"\"\"\"clientInfo\"\"\"\":{\"\"\"\"name\"\"\"\":\"\"\"\"test\"\"\"\",\"\"\"\"version\"\"\"\":\"\"\"\"1.0.0\"\"\"\"}}}' sleep 0.5 echo '{\"\"\"\"jsonrpc\"\"\"\":\"\"\"\"2.0\"\"\"\",\"\"\"\"id\"\"\"\":2,\"\"\"\"method\"\"\"\":\"\"\"\"tools/list\"\"\"\"}' sleep 0.5 echo '{\"\"\"\"jsonrpc\"\"\"\":\"\"\"\"2.0\"\"\"\",\"\"\"\"id\"\"\"\":3,\"\"\"\"method\"\"\"\":\"\"\"\"tools/call\"\"\"\",\"\"\"\"params\"\"\"\":{\"\"\"\"name\"\"\"\":\"\"\"\"get_weather\"\"\"\",\"\"\"\"arguments\"\"\"\":{\"\"\"\"city\"\"\"\":\"\"\"\"Moscow\"\"\"\"}}}' sleep 2 })",
-      "Bash(node index.js:*)"
+      "Bash(node index.js:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)"
     ]
   }
 }

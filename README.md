@@ -38,3 +38,10 @@ in your IDE’s toolbar or run it directly from the terminal:
 ---
 
 Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+
+Запуск сервера: 
+../weather-scheduler-mcp   
+node index.js
+
+Выключение сервера:
+lsof -ti:8081 | xargs kill -9
