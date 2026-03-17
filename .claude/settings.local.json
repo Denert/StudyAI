@@ -14,7 +14,11 @@
       "Bash(lsof:*)",
       "Bash(xargs kill:*)",
       "Bash(timeout 3 node:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:zapier.com)",
+      "Bash(find /Users/mivelichko/.studyai/logs -type f | xargs ls -la 2>/dev/null)",
+      "Bash(grep -n \"^\\\\\\([0-9]\\\\{1,3\\\\}\\\\\\) \\\\\\([А-ЯЁA-Z]\\\\\\)\" /Users/mivelichko/.studyai/rag-docs/algs.md | head -60)"
     ]
   }
 }

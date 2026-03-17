@@ -31,6 +31,9 @@ import ru.mike.study.studyai.data.FactData
 import ru.mike.study.studyai.data.TaskPhase
 import ru.mike.study.studyai.mcp.McpServersScreen
 import ru.mike.study.studyai.mcp.McpViewModel
+import ru.mike.study.studyai.rag.RagMode
+import ru.mike.study.studyai.rag.ui.RagScreen
+import ru.mike.study.studyai.rag.ui.RagViewModel
 import ru.mike.study.studyai.viewmodel.ChatViewModel
 
 @Composable
@@ -59,9 +62,12 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var showFactsDialog by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showMcpDialog by remember { mutableStateOf(false) }
+    var showRagDialog by remember { mutableStateOf(false) }
+    val ragMode by viewModel.ragMode.collectAsState()
 
     // MCP ViewModel
     val mcpViewModel = remember { McpViewModel() }
+    val ragViewModel = remember { RagViewModel(viewModel.ragService) }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -118,6 +124,18 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     viewModel = mcpViewModel,
                     onClose = { showMcpDialog = false }
                 )
+            }
+        }
+    }
+
+    if (showRagDialog) {
+        Dialog(onDismissRequest = { showRagDialog = false }) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                RagScreen(viewModel = ragViewModel, onDismiss = { showRagDialog = false })
             }
         }
     }
@@ -276,6 +294,37 @@ fun ChatScreen(viewModel: ChatViewModel) {
                                 Icons.Default.Extension,
                                 contentDescription = "MCP Серверы",
                                 modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // RAG button
+                        IconButton(
+                            onClick = { showRagDialog = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Storage,
+                                contentDescription = "RAG Индекс",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    // RAG mode switcher
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("RAG:", style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(end = 4.dp))
+                        RagMode.entries.forEach { mode ->
+                            FilterChip(
+                                selected = ragMode == mode,
+                                onClick = { viewModel.setRagMode(mode) },
+                                label = { Text(mode.displayName, style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.height(28.dp)
                             )
                         }
                     }

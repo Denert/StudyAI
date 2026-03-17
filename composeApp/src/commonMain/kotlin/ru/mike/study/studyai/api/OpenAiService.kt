@@ -944,13 +944,19 @@ ${lastUserMessage.content}
         userMessage: String,
         tools: List<OpenAiTool>,
         temperature: Float = 1.0f,
-        model: String? = null
+        model: String? = null,
+        ragSystemContext: String? = null
     ): Result<ChatResultWithTools> {
         return try {
             allMessages.add(OpenAiMessage(role = "user", content = userMessage))
 
             val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
-            val contextMessages = buildContextMessages()
+            val baseContextMessages = buildContextMessages()
+            val contextMessages = if (ragSystemContext != null) {
+                listOf(OpenAiMessage(role = "system", content = ragSystemContext)) + baseContextMessages
+            } else {
+                baseContextMessages
+            }
 
             val request = OpenAiRequest(
                 model = requestModel,

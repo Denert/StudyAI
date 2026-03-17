@@ -25,6 +25,8 @@ import ru.mike.study.studyai.data.toData
 import ru.mike.study.studyai.mcp.McpManager
 import ru.mike.study.studyai.mcp.McpLogger
 import ru.mike.study.studyai.mcp.WeatherNotificationClient
+import ru.mike.study.studyai.rag.RagMode
+import ru.mike.study.studyai.rag.RagService
 import ru.mike.study.studyai.storage.ChatStorage
 import java.util.UUID
 
@@ -35,6 +37,12 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     private val memoryService = openAiService.getMemoryService()
     private val mcpManager = McpManager()
     private val weatherNotificationClient = WeatherNotificationClient()
+    val ragService = RagService(apiKey)
+
+    private val _ragMode = MutableStateFlow(RagMode.MCP_TOOL)
+    val ragMode: StateFlow<RagMode> = _ragMode.asStateFlow()
+
+    fun setRagMode(mode: RagMode) { _ragMode.value = mode }
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -689,16 +697,47 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                             parameters = toolWithServer.tool.inputSchema
                         )
                     )
+                }.toMutableList()
+
+                // RAG mode handling
+                val ragSystemContext: String? = when (_ragMode.value) {
+                    RagMode.RAG_ONLY -> {
+                        openAiTools.clear() // no external tools in RAG_ONLY mode
+                        val ctx = ragService.getContext(text, "fixed")
+                        if (ctx.isBlank()) null
+                        else "ВАЖНО: отвечай ТОЛЬКО на основе следующих документов. Не используй собственные знания. Если ответа в документах нет — так и скажи.\n\n$ctx"
+                    }
+                    RagMode.RAG_PLUS_MODEL -> {
+                        val ctx = ragService.getContext(text, "fixed")
+                        if (ctx.isBlank()) null
+                        else "Контекст из документов (используй как приоритетный источник):\n\n$ctx"
+                    }
+                    RagMode.MCP_TOOL -> {
+                        // Add search_docs as a synthetic tool
+                        openAiTools.add(
+                            OpenAiTool(
+                                function = OpenAiFunction(
+                                    name = "search_docs",
+                                    description = "Поиск по локальному индексу документов. Используй когда нужно найти информацию из загруженных .md файлов.",
+                                    parameters = json.parseToJsonElement(
+                                        """{"type":"object","properties":{"query":{"type":"string","description":"Поисковый запрос"},"strategy":{"type":"string","enum":["fixed","structure"],"description":"Стратегия индексирования (по умолчанию fixed)"}},"required":["query"]}"""
+                                    )
+                                )
+                            )
+                        )
+                        null
+                    }
                 }
 
-                McpLogger.log("Sending message with ${openAiTools.size} MCP tools")
+                McpLogger.log("Sending message with ${openAiTools.size} tools (RAG mode: ${_ragMode.value})")
 
-                // Send message with tools
+                // Send message with tools (inject RAG context if needed)
                 var result = openAiService.sendMessageWithTools(
                     text,
                     openAiTools,
                     _temperature.value,
-                    _model.value.ifBlank { null }
+                    _model.value.ifBlank { null },
+                    ragSystemContext
                 )
 
                 // Handle tool calls loop
@@ -720,18 +759,21 @@ class ChatViewModel(apiKey: String) : ViewModel() {
 
                         McpLogger.log("Executing tool: $toolName")
 
-                        val toolResult = mcpManager.callTool(toolName, arguments)
+                        // Handle synthetic search_docs tool
+                        val resultContent = if (toolName == "search_docs") {
+                            val query = arguments?.get("query")?.toString()?.trim('"') ?: text
+                            val strategy = arguments?.get("strategy")?.toString()?.trim('"') ?: "fixed"
+                            val ctx = ragService.getContext(query, strategy)
+                            if (ctx.isBlank()) "Документы по запросу не найдены." else ctx
+                        } else {
+                            val toolResult = mcpManager.callTool(toolName, arguments)
+                            toolResult.fold(
+                                onSuccess = { it.content.firstOrNull()?.text ?: "Success" },
+                                onFailure = { "Error: ${it.message}" }
+                            )
+                        }
 
-                        val resultContent = toolResult.fold(
-                            onSuccess = { it.content.firstOrNull()?.text ?: "Success" },
-                            onFailure = { "Error: ${it.message}" }
-                        )
-
-                        toolResults.add(ToolResult(
-                            toolCallId = toolCall.id,
-                            content = resultContent
-                        ))
-
+                        toolResults.add(ToolResult(toolCallId = toolCall.id, content = resultContent))
                         McpLogger.log("Tool $toolName result: ${resultContent.take(100)}")
                     }
 
