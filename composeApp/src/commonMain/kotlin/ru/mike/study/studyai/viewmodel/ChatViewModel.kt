@@ -701,6 +701,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
 
                 // RAG mode handling
                 val ragSystemContext: String? = when (_ragMode.value) {
+                    RagMode.NO_RAG -> null
                     RagMode.RAG_ONLY -> {
                         openAiTools.clear() // no external tools in RAG_ONLY mode
                         val ctx = ragService.getContext(text, "fixed")
