@@ -717,6 +717,22 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                 }.toMutableList()
 
                 // RAG mode handling
+                val ragFormatInstruction = """
+                    ОБЯЗАТЕЛЬНЫЙ ФОРМАТ ОТВЕТА (строго соблюдай структуру):
+
+                    ### Ответ
+                    [Твой ответ на вопрос пользователя]
+
+                    ### Источники
+                    - [название файла / раздел] (релевантность: X.XX)
+
+                    ### Цитаты
+                    > "точная цитата из документа"
+                    — [источник]
+
+                    ВАЖНО: Если предоставленный контекст пуст, не содержит релевантной информации или оценки релевантности низкие — в разделе "Ответ" напиши "Не знаю." и задай пользователю уточняющие вопросы, которые помогут найти нужную информацию. В разделах "Источники" и "Цитаты" в таком случае напиши "Не найдено".
+                """.trimIndent()
+
                 val ragSystemContext: String? = when (_ragMode.value) {
                     RagMode.NO_RAG -> null
                     RagMode.RAG_ONLY -> {
@@ -737,8 +753,11 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                         } else {
                             ragService.getContext(text, "fixed")
                         }
-                        if (ctx.isBlank()) null
-                        else "ВАЖНО: отвечай ТОЛЬКО на основе следующих документов. Не используй собственные знания. Если ответа в документах нет — так и скажи.\n\n$ctx"
+                        val contextBlock = if (ctx.isBlank())
+                            "КОНТЕКСТ ИЗ ДОКУМЕНТОВ:\nДокументы не найдены или не прошли порог релевантности."
+                        else
+                            "ВАЖНО: отвечай ТОЛЬКО на основе следующих документов. Не используй собственные знания.\n\nКОНТЕКСТ ИЗ ДОКУМЕНТОВ:\n$ctx"
+                        "$ragFormatInstruction\n\n$contextBlock"
                     }
                     RagMode.RAG_PLUS_MODEL -> {
                         val ctx = if (_ragFilterEnabled.value) {
@@ -757,8 +776,11 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                         } else {
                             ragService.getContext(text, "fixed")
                         }
-                        if (ctx.isBlank()) null
-                        else "Контекст из документов (используй как приоритетный источник):\n\n$ctx"
+                        val contextBlock = if (ctx.isBlank())
+                            "КОНТЕКСТ ИЗ ДОКУМЕНТОВ:\nДокументы не найдены."
+                        else
+                            "КОНТЕКСТ ИЗ ДОКУМЕНТОВ (используй как приоритетный источник, можешь дополнять своими знаниями):\n$ctx"
+                        "$ragFormatInstruction\n\n$contextBlock"
                     }
                     RagMode.MCP_TOOL -> {
                         // Add search_docs as a synthetic tool
@@ -773,7 +795,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                                 )
                             )
                         )
-                        null
+                        ragFormatInstruction
                     }
                 }
 
