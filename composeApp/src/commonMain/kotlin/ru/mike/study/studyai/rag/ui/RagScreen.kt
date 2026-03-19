@@ -25,6 +25,14 @@ import ru.mike.study.studyai.rag.RagService
 @Composable
 fun RagScreen(
     viewModel: RagViewModel,
+    ragMinScore: Float = 0.3f,
+    ragTopK: Int = 5,
+    ragCandidateK: Int = 20,
+    ragFilterEnabled: Boolean = true,
+    onMinScoreChange: (Float) -> Unit = {},
+    onTopKChange: (Int) -> Unit = {},
+    onCandidateKChange: (Int) -> Unit = {},
+    onFilterEnabledChange: (Boolean) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val isIndexing by viewModel.isIndexing.collectAsState()
@@ -70,6 +78,9 @@ fun RagScreen(
                 Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }) {
                     Text("Поиск", modifier = Modifier.padding(vertical = 12.dp))
                 }
+                Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }) {
+                    Text("Настройки", modifier = Modifier.padding(vertical = 12.dp))
+                }
             }
 
             when (selectedTab) {
@@ -95,6 +106,122 @@ fun RagScreen(
                     onSearch = { viewModel.search(searchInput) },
                     isSearching = isSearching,
                     searchResults = searchResults
+                )
+                3 -> SearchSettingsTab(
+                    ragMinScore = ragMinScore,
+                    ragTopK = ragTopK,
+                    ragCandidateK = ragCandidateK,
+                    ragFilterEnabled = ragFilterEnabled,
+                    onMinScoreChange = onMinScoreChange,
+                    onTopKChange = onTopKChange,
+                    onCandidateKChange = onCandidateKChange,
+                    onFilterEnabledChange = onFilterEnabledChange
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchSettingsTab(
+    ragMinScore: Float,
+    ragTopK: Int,
+    ragCandidateK: Int,
+    ragFilterEnabled: Boolean,
+    onMinScoreChange: (Float) -> Unit,
+    onTopKChange: (Int) -> Unit,
+    onCandidateKChange: (Int) -> Unit,
+    onFilterEnabledChange: (Boolean) -> Unit
+) {
+    var minScoreText by remember(ragMinScore) { mutableStateOf(ragMinScore.toString()) }
+    var topKText by remember(ragTopK) { mutableStateOf(ragTopK.toString()) }
+    var candidateKText by remember(ragCandidateK) { mutableStateOf(ragCandidateK.toString()) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("Параметры поиска (RAG_ONLY и RAG+Модель)", style = MaterialTheme.typography.titleMedium)
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Фильтрация и rewrite запроса", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (ragFilterEnabled) "Включено: rewrite + candidateK → minScore → topK"
+                    else "Выключено: простой поиск top-5",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = ragFilterEnabled, onCheckedChange = onFilterEnabledChange)
+        }
+
+        HorizontalDivider()
+
+        Text(
+            "Применяются только в режимах «Только RAG» и «RAG + Модель». Запрос автоматически переформулируется через LLM перед поиском.",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (ragFilterEnabled) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+        )
+
+        OutlinedTextField(
+            enabled = ragFilterEnabled,
+            value = candidateKText,
+            onValueChange = { v ->
+                candidateKText = v
+                v.toIntOrNull()?.let { onCandidateKChange(it) }
+            },
+            label = { Text("Кандидаты (candidateK)") },
+            supportingText = { Text("Сколько чанков достать до фильтрации. По умолчанию: 20") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        OutlinedTextField(
+            enabled = ragFilterEnabled,
+            value = minScoreText,
+            onValueChange = { v ->
+                minScoreText = v
+                v.toFloatOrNull()?.let { onMinScoreChange(it) }
+            },
+            label = { Text("Порог релевантности (minScore)") },
+            supportingText = { Text("Отсекать чанки ниже этого cosine similarity. Диапазон: 0.0–1.0. По умолчанию: 0.3") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        OutlinedTextField(
+            enabled = ragFilterEnabled,
+            value = topKText,
+            onValueChange = { v ->
+                topKText = v
+                v.toIntOrNull()?.let { onTopKChange(it) }
+            },
+            label = { Text("Итоговых чанков (topK)") },
+            supportingText = { Text("Сколько чанков подать в контекст после фильтрации. По умолчанию: 5") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Текущие значения", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    if (ragFilterEnabled) "candidateK = $ragCandidateK → фильтр minScore ≥ $ragMinScore → topK = $ragTopK"
+                    else "фильтр выключен — простой поиск top-5",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
             }
         }

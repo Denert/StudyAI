@@ -44,6 +44,23 @@ class ChatViewModel(apiKey: String) : ViewModel() {
 
     fun setRagMode(mode: RagMode) { _ragMode.value = mode }
 
+    private val _ragMinScore = MutableStateFlow(0.3f)
+    val ragMinScore: StateFlow<Float> = _ragMinScore.asStateFlow()
+
+    private val _ragTopK = MutableStateFlow(5)
+    val ragTopK: StateFlow<Int> = _ragTopK.asStateFlow()
+
+    private val _ragCandidateK = MutableStateFlow(20)
+    val ragCandidateK: StateFlow<Int> = _ragCandidateK.asStateFlow()
+
+    private val _ragFilterEnabled = MutableStateFlow(true)
+    val ragFilterEnabled: StateFlow<Boolean> = _ragFilterEnabled.asStateFlow()
+
+    fun setRagMinScore(v: Float) { _ragMinScore.value = v.coerceIn(0f, 1f) }
+    fun setRagTopK(v: Int) { _ragTopK.value = v.coerceIn(1, 50) }
+    fun setRagCandidateK(v: Int) { _ragCandidateK.value = v.coerceIn(1, 100) }
+    fun setRagFilterEnabled(v: Boolean) { _ragFilterEnabled.value = v }
+
     private val json = Json { ignoreUnknownKeys = true }
 
     private val _chats = MutableStateFlow<List<Chat>>(emptyList())
@@ -704,12 +721,42 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                     RagMode.NO_RAG -> null
                     RagMode.RAG_ONLY -> {
                         openAiTools.clear() // no external tools in RAG_ONLY mode
-                        val ctx = ragService.getContext(text, "fixed")
+                        val ctx = if (_ragFilterEnabled.value) {
+                            val (rewritten, filtered) = ragService.getContextFiltered(
+                                text, "fixed",
+                                topK = _ragTopK.value,
+                                candidateK = _ragCandidateK.value,
+                                minScore = _ragMinScore.value,
+                                model = _model.value.ifBlank { "gpt-4o-mini" }
+                            )
+                            if (rewritten != text) {
+                                val rewriteMsg = ChatMessage(content = rewritten, isFromUser = true, isQueryRewrite = true)
+                                _messages.value = _messages.value.dropLast(1) + rewriteMsg + _messages.value.last()
+                            }
+                            filtered
+                        } else {
+                            ragService.getContext(text, "fixed")
+                        }
                         if (ctx.isBlank()) null
                         else "ВАЖНО: отвечай ТОЛЬКО на основе следующих документов. Не используй собственные знания. Если ответа в документах нет — так и скажи.\n\n$ctx"
                     }
                     RagMode.RAG_PLUS_MODEL -> {
-                        val ctx = ragService.getContext(text, "fixed")
+                        val ctx = if (_ragFilterEnabled.value) {
+                            val (rewritten, filtered) = ragService.getContextFiltered(
+                                text, "fixed",
+                                topK = _ragTopK.value,
+                                candidateK = _ragCandidateK.value,
+                                minScore = _ragMinScore.value,
+                                model = _model.value.ifBlank { "gpt-4o-mini" }
+                            )
+                            if (rewritten != text) {
+                                val rewriteMsg = ChatMessage(content = rewritten, isFromUser = true, isQueryRewrite = true)
+                                _messages.value = _messages.value.dropLast(1) + rewriteMsg + _messages.value.last()
+                            }
+                            filtered
+                        } else {
+                            ragService.getContext(text, "fixed")
+                        }
                         if (ctx.isBlank()) null
                         else "Контекст из документов (используй как приоритетный источник):\n\n$ctx"
                     }

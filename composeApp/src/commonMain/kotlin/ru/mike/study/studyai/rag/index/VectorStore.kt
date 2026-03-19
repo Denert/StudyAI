@@ -34,6 +34,22 @@ class VectorStore(
             .take(topK)
     }
 
+    fun searchWithFilter(
+        queryEmbedding: List<Float>,
+        strategy: String,
+        candidateK: Int = 20,
+        topK: Int = 5,
+        minScore: Float = 0.3f
+    ): List<Pair<RagChunk, Float>> {
+        return load(strategy)
+            .filter { it.embedding.isNotEmpty() }
+            .map { it to cosineSimilarity(queryEmbedding, it.embedding) }
+            .sortedByDescending { it.second }
+            .take(candidateK)
+            .filter { it.second >= minScore }
+            .take(topK)
+    }
+
     fun hasIndex(strategy: String): Boolean = File(dir, "${strategy}_index.json").exists()
 
     private fun cosineSimilarity(a: List<Float>, b: List<Float>): Float {

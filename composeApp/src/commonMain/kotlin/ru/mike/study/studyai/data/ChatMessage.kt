@@ -18,7 +18,8 @@ data class ChatMessage(
     val metadata: MessageMetadata? = null,
     val phase: TaskPhase? = null,           // Текущий этап задачи
     val phaseCompleted: Boolean = false,    // Этап завершён, ждём подтверждения
-    val isSystemNotification: Boolean = false // Системное уведомление (погода и т.д.)
+    val isSystemNotification: Boolean = false, // Системное уведомление (погода и т.д.)
+    val isQueryRewrite: Boolean = false     // Переформулированный RAG-запрос
 )
 
 data class MessageMetadata(

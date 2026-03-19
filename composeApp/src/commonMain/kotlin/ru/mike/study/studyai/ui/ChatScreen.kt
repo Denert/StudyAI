@@ -64,6 +64,10 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var showMcpDialog by remember { mutableStateOf(false) }
     var showRagDialog by remember { mutableStateOf(false) }
     val ragMode by viewModel.ragMode.collectAsState()
+    val ragMinScore by viewModel.ragMinScore.collectAsState()
+    val ragTopK by viewModel.ragTopK.collectAsState()
+    val ragCandidateK by viewModel.ragCandidateK.collectAsState()
+    val ragFilterEnabled by viewModel.ragFilterEnabled.collectAsState()
 
     // MCP ViewModel
     val mcpViewModel = remember { McpViewModel() }
@@ -135,7 +139,18 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface
             ) {
-                RagScreen(viewModel = ragViewModel, onDismiss = { showRagDialog = false })
+                RagScreen(
+                    viewModel = ragViewModel,
+                    ragMinScore = ragMinScore,
+                    ragTopK = ragTopK,
+                    ragCandidateK = ragCandidateK,
+                    ragFilterEnabled = ragFilterEnabled,
+                    onMinScoreChange = { viewModel.setRagMinScore(it) },
+                    onTopKChange = { viewModel.setRagTopK(it) },
+                    onCandidateKChange = { viewModel.setRagCandidateK(it) },
+                    onFilterEnabledChange = { viewModel.setRagFilterEnabled(it) },
+                    onDismiss = { showRagDialog = false }
+                )
             }
         }
     }
@@ -1224,10 +1239,10 @@ fun ChatMessageItem(
         return
     }
 
-    val backgroundColor = if (message.isFromUser) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.secondaryContainer
+    val backgroundColor = when {
+        message.isQueryRewrite -> MaterialTheme.colorScheme.tertiaryContainer
+        message.isFromUser -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.secondaryContainer
     }
 
     Column(
@@ -1278,7 +1293,14 @@ fun ChatMessageItem(
         }
 
 
-        if (message.isFromUser) {
+        if (message.isQueryRewrite) {
+            Text(
+                text = "↻ переформулировано",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 4.dp, top = 4.dp)
+            )
+        } else if (message.isFromUser) {
             val estimatedTokens = (message.content.length / 2.5).toInt().coerceAtLeast(1)
             Text(
                 text = "~$estimatedTokens tokens",
