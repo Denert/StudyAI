@@ -29,6 +29,7 @@ import ru.mike.study.studyai.data.ChatMessage
 import ru.mike.study.studyai.data.ContextStrategy
 import ru.mike.study.studyai.data.FactData
 import ru.mike.study.studyai.data.TaskPhase
+import ru.mike.study.studyai.data.TaskStateData
 import ru.mike.study.studyai.mcp.McpServersScreen
 import ru.mike.study.studyai.mcp.McpViewModel
 import ru.mike.study.studyai.rag.RagMode
@@ -63,6 +64,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var showProfileDialog by remember { mutableStateOf(false) }
     var showMcpDialog by remember { mutableStateOf(false) }
     var showRagDialog by remember { mutableStateOf(false) }
+    var showTaskStateDialog by remember { mutableStateOf(false) }
+    val taskState by viewModel.taskState.collectAsState()
     val ragMode by viewModel.ragMode.collectAsState()
     val ragMinScore by viewModel.ragMinScore.collectAsState()
     val ragTopK by viewModel.ragTopK.collectAsState()
@@ -99,6 +102,14 @@ fun ChatScreen(viewModel: ChatViewModel) {
             onUpdateFact = { key, value -> viewModel.updateFact(key, value) },
             onDeleteFact = { viewModel.deleteFact(it) },
             onDismiss = { showFactsDialog = false }
+        )
+    }
+
+    if (showTaskStateDialog) {
+        TaskStateDialog(
+            taskState = taskState,
+            onClear = { viewModel.clearTaskState() },
+            onDismiss = { showTaskStateDialog = false }
         )
     }
 
@@ -411,6 +422,24 @@ fun ChatScreen(viewModel: ChatViewModel) {
                                         contentDescription = "Edit Facts"
                                     )
                                 }
+                            }
+                        }
+
+                        // Task State button
+                        IconButton(onClick = { showTaskStateDialog = true }) {
+                            BadgedBox(
+                                badge = {
+                                    if (!taskState.isEmpty) {
+                                        Badge()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Assignment,
+                                    contentDescription = "Task State",
+                                    tint = if (!taskState.isEmpty) MaterialTheme.colorScheme.primary
+                                           else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
 
@@ -757,6 +786,77 @@ fun BranchSelectorDialog(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun TaskStateDialog(
+    taskState: TaskStateData,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().wrapContentHeight(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Состояние задачи", style = MaterialTheme.typography.titleMedium)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Закрыть")
+                    }
+                }
+
+                if (taskState.isEmpty) {
+                    Text(
+                        "Состояние пока не определено. Начните диалог — оно будет заполняться автоматически.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    if (taskState.goal.isNotBlank()) {
+                        Text("Цель", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
+                        Text(taskState.goal, style = MaterialTheme.typography.bodyMedium)
+                    }
+
+                    if (taskState.clarifications.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Что уточнено", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
+                        taskState.clarifications.forEach { item ->
+                            Text("• $item", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+
+                    if (taskState.constraints.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Ограничения и термины", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
+                        taskState.constraints.forEach { item ->
+                            Text("• $item", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { onClear(); onDismiss() }) {
+                        Text("Сбросить")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = onDismiss) {
+                        Text("Закрыть")
+                    }
+                }
+            }
+        }
     }
 }
 

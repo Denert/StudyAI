@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonElement
 import ru.mike.study.studyai.data.ContextStrategy
 import ru.mike.study.studyai.data.FactData
 import ru.mike.study.studyai.data.MessageMetadata
+import ru.mike.study.studyai.data.TaskStateData
 import ru.mike.study.studyai.data.OpenAiMessage
 import ru.mike.study.studyai.data.OpenAiRequest
 import ru.mike.study.studyai.data.OpenAiResponse
@@ -81,6 +82,7 @@ class OpenAiService(private val apiKey: String) {
 
     // Facts (for STICKY_FACTS strategy)
     private val facts = mutableListOf<FactData>()
+    private var taskState: TaskStateData = TaskStateData()
 
     // Current strategy settings
     private var currentStrategy: ContextStrategy = ContextStrategy.MEMORY_LAYERS
@@ -109,6 +111,27 @@ class OpenAiService(private val apiKey: String) {
     fun setFacts(newFacts: List<FactData>) {
         facts.clear()
         facts.addAll(newFacts)
+    }
+
+    fun setTaskState(state: TaskStateData) {
+        taskState = state
+    }
+
+    private fun buildTaskStateSystemMessage(): OpenAiMessage? {
+        if (taskState.isEmpty) return null
+        val sb = StringBuilder("СОСТОЯНИЕ ЗАДАЧИ:\n")
+        if (taskState.goal.isNotBlank()) {
+            sb.append("Цель: ${taskState.goal}\n")
+        }
+        if (taskState.clarifications.isNotEmpty()) {
+            sb.append("\nЧто уточнено:\n")
+            taskState.clarifications.forEach { sb.append("- $it\n") }
+        }
+        if (taskState.constraints.isNotEmpty()) {
+            sb.append("\nОграничения и термины:\n")
+            taskState.constraints.forEach { sb.append("- $it\n") }
+        }
+        return OpenAiMessage(role = "system", content = sb.toString().trimEnd())
     }
 
     fun getFacts(): List<FactData> = facts.toList()
@@ -952,10 +975,11 @@ ${lastUserMessage.content}
 
             val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
             val baseContextMessages = buildContextMessages()
-            val contextMessages = if (ragSystemContext != null) {
-                listOf(OpenAiMessage(role = "system", content = ragSystemContext)) + baseContextMessages
-            } else {
-                baseContextMessages
+            val taskStateMsg = buildTaskStateSystemMessage()
+            val contextMessages = buildList {
+                taskStateMsg?.let { add(it) }
+                if (ragSystemContext != null) add(OpenAiMessage(role = "system", content = ragSystemContext))
+                addAll(baseContextMessages)
             }
 
             val request = OpenAiRequest(
@@ -1137,6 +1161,87 @@ ${lastUserMessage.content}
             println("OpenAI Error: ${e.message}")
             e.printStackTrace()
             Result.failure(e)
+        }
+    }
+
+    suspend fun extractTaskState(model: String? = null): TaskStateData? {
+        val lastUserMessage = allMessages.lastOrNull { it.role == "user" } ?: return null
+        val lastAssistantMessage = allMessages.lastOrNull { it.role == "assistant" } ?: return null
+
+        return try {
+            val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
+
+            val currentGoal = taskState.goal.ifBlank { "Не определена" }
+            val currentClarifications = if (taskState.clarifications.isEmpty()) "Нет"
+                else taskState.clarifications.joinToString("\n") { "- $it" }
+            val currentConstraints = if (taskState.constraints.isEmpty()) "Нет"
+                else taskState.constraints.joinToString("\n") { "- $it" }
+
+            val prompt = """Проанализируй последний обмен сообщениями и обнови состояние задачи.
+
+ТЕКУЩЕЕ СОСТОЯНИЕ:
+Цель: $currentGoal
+Уточнения: $currentClarifications
+Ограничения и термины: $currentConstraints
+
+СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ:
+${lastUserMessage.content}
+
+ОТВЕТ АССИСТЕНТА:
+${lastAssistantMessage.content}
+
+Обнови состояние задачи. Если нового нет — верни текущее без изменений.
+
+Ответь СТРОГО в формате:
+
+GOAL:
+[одно предложение — чего хочет достичь пользователь, или "Не определена"]
+
+CLARIFICATIONS:
+- [что уточнил пользователь]
+
+CONSTRAINTS:
+- [ограничение или термин]
+
+Если уточнений или ограничений нет — оставь секцию пустой (без дефисов)."""
+
+            val request = OpenAiRequest(
+                model = requestModel,
+                messages = listOf(OpenAiMessage(role = "user", content = prompt)),
+                temperature = 0.2f
+            )
+
+            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+                setBody(request)
+            }
+
+            val content = json.decodeFromString<OpenAiResponse>(httpResponse.bodyAsText())
+                .choices?.firstOrNull()?.message?.content ?: return null
+
+            println("★ TaskState extraction response:\n$content")
+
+            val goalMatch = Regex("""GOAL:\s*\n(.+)""").find(content)
+            val goal = goalMatch?.groupValues?.get(1)?.trim()
+                ?.takeIf { it != "Не определена" } ?: taskState.goal
+
+            val clarificationsSection = Regex("""CLARIFICATIONS:\s*\n(.*?)(?=\nCONSTRAINTS:|\z)""", RegexOption.DOT_MATCHES_ALL)
+                .find(content)?.groupValues?.get(1) ?: ""
+            val clarifications = clarificationsSection.lines()
+                .map { it.trim().removePrefix("- ").trim() }
+                .filter { it.isNotBlank() }
+
+            val constraintsSection = Regex("""CONSTRAINTS:\s*\n(.*)""", RegexOption.DOT_MATCHES_ALL)
+                .find(content)?.groupValues?.get(1) ?: ""
+            val constraints = constraintsSection.lines()
+                .map { it.trim().removePrefix("- ").trim() }
+                .filter { it.isNotBlank() }
+
+            TaskStateData(goal = goal, clarifications = clarifications, constraints = constraints)
+        } catch (e: Exception) {
+            println("TaskState extraction failed: ${e.message}")
+            null
         }
     }
 }

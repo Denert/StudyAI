@@ -19,6 +19,7 @@ import ru.mike.study.studyai.data.ChatMessage
 import ru.mike.study.studyai.data.ChatSummaryData
 import ru.mike.study.studyai.data.ContextStrategy
 import ru.mike.study.studyai.data.FactData
+import ru.mike.study.studyai.data.TaskStateData
 import ru.mike.study.studyai.data.TaskPhase
 import ru.mike.study.studyai.data.toChatMessage
 import ru.mike.study.studyai.data.toData
@@ -102,6 +103,16 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     // Facts (for STICKY_FACTS strategy)
     private val _facts = MutableStateFlow<List<FactData>>(emptyList())
     val facts: StateFlow<List<FactData>> = _facts.asStateFlow()
+
+    // Task State
+    private val _taskState = MutableStateFlow(TaskStateData())
+    val taskState: StateFlow<TaskStateData> = _taskState.asStateFlow()
+
+    fun clearTaskState() {
+        _taskState.value = TaskStateData()
+        openAiService.setTaskState(TaskStateData())
+        saveCurrentChat()
+    }
 
     // Branching
     private val _checkpointIndex = MutableStateFlow<Int?>(null)
@@ -342,6 +353,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         _messages.value = chat?.messages?.map { it.toChatMessage() } ?: emptyList()
         _summaries.value = chat?.summaries ?: emptyList()
         _facts.value = chat?.facts ?: emptyList()
+        _taskState.value = chat?.taskState ?: TaskStateData()
         _model.value = chat?.model ?: ""
         _temperature.value = chat?.temperature ?: 1.0f
         _strategy.value = chat?.strategy ?: ContextStrategy.MEMORY_LAYERS
@@ -357,6 +369,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         openAiService.setStrategy(_strategy.value)
         openAiService.setSlidingWindowSize(_slidingWindowSize.value)
         openAiService.setFacts(_facts.value)
+        openAiService.setTaskState(_taskState.value)
         openAiService.setChatId(chatId)
 
         // Restore summaries in OpenAI service
@@ -418,6 +431,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
             messages = _messages.value.filter { !it.isLoading }.map { it.toData() },
             summaries = _summaries.value,
             facts = _facts.value,
+            taskState = _taskState.value,
             strategy = _strategy.value,
             slidingWindowSize = _slidingWindowSize.value,
             model = _model.value,
@@ -873,6 +887,8 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                             ContextStrategy.MEMORY_LAYERS -> extractMemoryLayersIfNeeded()
                             else -> { /* No post-processing */ }
                         }
+                        // Task state is extracted for all strategies
+                        extractTaskStateIfNeeded()
                     },
                     onFailure = { error ->
                         val errorMessage = ChatMessage(
@@ -966,6 +982,15 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                     println("Context management: Updated message with Phase = $phase, completed = ${result.phaseCompleted}")
                 }
             }
+        }
+    }
+
+    private suspend fun extractTaskStateIfNeeded() {
+        val result = openAiService.extractTaskState(_model.value.ifBlank { null })
+        if (result != null) {
+            _taskState.value = result
+            openAiService.setTaskState(result)
+            println("TaskState updated: goal=${result.goal}, clarifications=${result.clarifications.size}, constraints=${result.constraints.size}")
         }
     }
 

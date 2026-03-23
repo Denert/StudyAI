@@ -25,12 +25,22 @@ enum class TaskPhaseData {
 }
 
 @Serializable
+data class TaskStateData(
+    val goal: String = "",
+    val clarifications: List<String> = emptyList(),
+    val constraints: List<String> = emptyList()
+) {
+    val isEmpty: Boolean get() = goal.isBlank() && clarifications.isEmpty() && constraints.isEmpty()
+}
+
+@Serializable
 data class Chat(
     val id: String,
     val name: String,
     val messages: List<ChatMessageData> = emptyList(),
     val summaries: List<ChatSummaryData> = emptyList(),
     val facts: List<FactData> = emptyList(),
+    val taskState: TaskStateData = TaskStateData(),
     val branches: List<ChatBranch> = emptyList(),
     val parentChatId: String? = null,
     val branchName: String? = null,
