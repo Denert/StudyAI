@@ -27,6 +27,7 @@ import androidx.compose.ui.window.Dialog
 import ru.mike.study.studyai.data.Chat
 import ru.mike.study.studyai.data.ChatMessage
 import ru.mike.study.studyai.data.ContextStrategy
+import ru.mike.study.studyai.config.ApiConfig
 import ru.mike.study.studyai.data.FactData
 import ru.mike.study.studyai.data.TaskPhase
 import ru.mike.study.studyai.data.TaskStateData
@@ -65,7 +66,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var showMcpDialog by remember { mutableStateOf(false) }
     var showRagDialog by remember { mutableStateOf(false) }
     var showTaskStateDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
     val taskState by viewModel.taskState.collectAsState()
+    val appSettings by viewModel.appSettings.collectAsState()
     val ragMode by viewModel.ragMode.collectAsState()
     val ragMinScore by viewModel.ragMinScore.collectAsState()
     val ragTopK by viewModel.ragTopK.collectAsState()
@@ -74,7 +77,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
 
     // MCP ViewModel
     val mcpViewModel = remember { McpViewModel() }
-    val ragViewModel = remember { RagViewModel(viewModel.ragService) }
+    // ragViewModel recreated when provider changes (ragService is rebuilt)
+    val ragViewModel = remember(appSettings) { RagViewModel(viewModel.ragService) }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -102,6 +106,15 @@ fun ChatScreen(viewModel: ChatViewModel) {
             onUpdateFact = { key, value -> viewModel.updateFact(key, value) },
             onDeleteFact = { viewModel.deleteFact(it) },
             onDismiss = { showFactsDialog = false }
+        )
+    }
+
+    if (showSettingsDialog) {
+        SettingsScreen(
+            settings = appSettings,
+            openAiApiKey = ApiConfig.apiKey,
+            onSave = { viewModel.updateSettings(it) },
+            onDismiss = { showSettingsDialog = false }
         )
     }
 
@@ -333,6 +346,21 @@ fun ChatScreen(viewModel: ChatViewModel) {
                                 contentDescription = "RAG Индекс",
                                 modifier = Modifier.size(20.dp),
                                 tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Settings button
+                        IconButton(
+                            onClick = { showSettingsDialog = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Настройки",
+                                modifier = Modifier.size(20.dp),
+                                tint = if (appSettings.provider == ru.mike.study.studyai.config.LlmProvider.OLLAMA)
+                                    MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }

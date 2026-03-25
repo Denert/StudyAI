@@ -43,7 +43,11 @@ data class MemoryExtractionResult(
     val invariants: List<String> = emptyList()
 )
 
-class OpenAiService(private val apiKey: String) {
+class OpenAiService(
+    private val apiKey: String,
+    baseUrl: String = "https://api.openai.com"
+) {
+    private val chatEndpoint = "$baseUrl/v1/chat/completions"
 
     companion object {
         const val DEFAULT_SLIDING_WINDOW_SIZE = 10
@@ -91,6 +95,9 @@ class OpenAiService(private val apiKey: String) {
     // Memory layers (for MEMORY_LAYERS strategy)
     private val memoryService = MemoryService()
     private var currentChatId: String = ""
+    private var memorySystemPromptEnabled: Boolean = true
+    private var memoryInvariantsEnabled: Boolean = true
+    private var memoryProfileEnabled: Boolean = true
 
     fun setChatId(chatId: String) {
         currentChatId = chatId
@@ -106,6 +113,12 @@ class OpenAiService(private val apiKey: String) {
     fun setSlidingWindowSize(size: Int) {
         slidingWindowSize = size
         println("★ Sliding window size set to: $size")
+    }
+
+    fun setMemoryConfig(systemPrompt: Boolean, invariants: Boolean, profile: Boolean) {
+        memorySystemPromptEnabled = systemPrompt
+        memoryInvariantsEnabled = invariants
+        memoryProfileEnabled = profile
     }
 
     fun setFacts(newFacts: List<FactData>) {
@@ -162,7 +175,7 @@ class OpenAiService(private val apiKey: String) {
 
             val startTime = System.currentTimeMillis()
 
-            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+            val httpResponse = client.post(chatEndpoint) {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 setBody(request)
@@ -328,7 +341,12 @@ class OpenAiService(private val apiKey: String) {
         val contextMessages = mutableListOf<OpenAiMessage>()
 
         // Build memory context from long-term and working memory (includes system instructions)
-        val memoryContext = memoryService.buildMemoryContext(currentChatId)
+        val memoryContext = memoryService.buildMemoryContext(
+            currentChatId,
+            systemPromptEnabled = memorySystemPromptEnabled,
+            invariantsEnabled = memoryInvariantsEnabled,
+            profileMemoryEnabled = memoryProfileEnabled
+        )
 
         if (memoryContext.isNotBlank()) {
             contextMessages.add(OpenAiMessage(
@@ -492,7 +510,7 @@ INVARIANTS:
 
             val startTime = System.currentTimeMillis()
 
-            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+            val httpResponse = client.post(chatEndpoint) {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 setBody(request)
@@ -758,7 +776,7 @@ Summary:"""
             println(jsonPretty.encodeToString(OpenAiRequest.serializer(), request))
             println("▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓")
 
-            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+            val httpResponse = client.post(chatEndpoint) {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 setBody(request)
@@ -860,7 +878,7 @@ ${lastUserMessage.content}
 
             val startTime = System.currentTimeMillis()
 
-            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+            val httpResponse = client.post(chatEndpoint) {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 setBody(request)
@@ -992,11 +1010,12 @@ ${lastUserMessage.content}
 
             println("═══════════════════════════════════════════════════════════")
             println("OpenAI Request with Tools (${tools.size} tools):")
+            println("  → Endpoint: $chatEndpoint")
             println("═══════════════════════════════════════════════════════════")
 
             val startTime = System.currentTimeMillis()
 
-            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+            val httpResponse = client.post(chatEndpoint) {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 setBody(request)
@@ -1102,7 +1121,7 @@ ${lastUserMessage.content}
 
             val startTime = System.currentTimeMillis()
 
-            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+            val httpResponse = client.post(chatEndpoint) {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 setBody(request)
@@ -1211,7 +1230,7 @@ CONSTRAINTS:
                 temperature = 0.2f
             )
 
-            val httpResponse = client.post("https://api.openai.com/v1/chat/completions") {
+            val httpResponse = client.post(chatEndpoint) {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 setBody(request)

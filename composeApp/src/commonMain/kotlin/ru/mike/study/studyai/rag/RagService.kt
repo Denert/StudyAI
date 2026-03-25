@@ -9,20 +9,30 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import ru.mike.study.studyai.config.AppSettings
+import ru.mike.study.studyai.config.LlmProvider
 import ru.mike.study.studyai.rag.chunking.FixedSizeChunker
 import ru.mike.study.studyai.rag.chunking.StructureChunker
 import ru.mike.study.studyai.rag.index.EmbeddingService
 import ru.mike.study.studyai.rag.index.VectorStore
 import java.io.File
 
-class RagService(private val apiKey: String) {
+class RagService(settings: AppSettings, openAiApiKey: String) {
+
+    private val effectiveApiKey = if (settings.provider == LlmProvider.OPENAI) openAiApiKey else ""
 
     val docsDir = File(System.getProperty("user.home") + "/.studyai/rag-docs").also { it.mkdirs() }
-    private val embeddingService = EmbeddingService(apiKey)
-    private val vectorStore = VectorStore()
+    private val embeddingService = EmbeddingService(
+        apiKey = effectiveApiKey,
+        baseUrl = settings.effectiveBaseUrl,
+        embeddingModel = settings.effectiveEmbeddingModel
+    )
+    private val vectorStore = VectorStore(providerPrefix = settings.providerPrefix)
     private val fixedChunker = FixedSizeChunker()
     private val structureChunker = StructureChunker()
 
+    private val chatEndpoint = "${settings.effectiveBaseUrl}/v1/chat/completions"
+    private val rewriteApiKey = effectiveApiKey
     private val json = Json { ignoreUnknownKeys = true }
     private val httpClient = HttpClient {
         install(ContentNegotiation) { json(json) }
@@ -113,8 +123,8 @@ class RagService(private val apiKey: String) {
 
     suspend fun rewriteQuery(query: String, model: String = "gpt-4o-mini"): String {
         return try {
-            val response = httpClient.post("https://api.openai.com/v1/chat/completions") {
-                header(HttpHeaders.Authorization, "Bearer $apiKey")
+            val response = httpClient.post(chatEndpoint) {
+                header(HttpHeaders.Authorization, "Bearer $rewriteApiKey")
                 contentType(ContentType.Application.Json)
                 setBody(RewriteRequest(
                     model = model,

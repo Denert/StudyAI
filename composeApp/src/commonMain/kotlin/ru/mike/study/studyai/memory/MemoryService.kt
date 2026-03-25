@@ -715,11 +715,16 @@ _Нет автоматических инвариантов_
     /**
      * Build context string from all memory layers for LLM
      */
-    fun buildMemoryContext(chatId: String): String {
+    fun buildMemoryContext(
+        chatId: String,
+        systemPromptEnabled: Boolean = true,
+        invariantsEnabled: Boolean = true,
+        profileMemoryEnabled: Boolean = true
+    ): String {
         val profile = readActiveProfile()
         val working = readWorkingMemory(chatId)
-        val systemPrompt = readSystemPrompt()
-        val invariants = readInvariants()
+        val systemPrompt = if (systemPromptEnabled) readSystemPrompt() else ""
+        val invariants = if (invariantsEnabled) readInvariants() else emptyList()
 
         return buildString {
             // System instructions first
@@ -736,8 +741,8 @@ _Нет автоматических инвариантов_
             }
 
             // Profile (Long-term memory)
-            if (profile.data.isNotEmpty() || profile.preferences.isNotEmpty() ||
-                profile.knowledge.isNotEmpty() || profile.decisions.isNotEmpty()) {
+            if (profileMemoryEnabled && (profile.data.isNotEmpty() || profile.preferences.isNotEmpty() ||
+                profile.knowledge.isNotEmpty() || profile.decisions.isNotEmpty())) {
                 appendLine("=== PROFILE: ${profile.name} ===")
 
                 if (profile.data.isNotEmpty()) {

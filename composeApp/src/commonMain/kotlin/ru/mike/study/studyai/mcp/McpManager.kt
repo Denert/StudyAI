@@ -20,6 +20,9 @@ class McpManager {
     suspend fun connectAll(): Map<String, Result<List<McpTool>>> {
         val results = mutableMapOf<String, Result<List<McpTool>>>()
 
+        // Clear stale cache so disabled servers don't keep their tools
+        serverTools.clear()
+
         val servers = configService.getServers().filter { it.enabled }
 
         for (server in servers) {

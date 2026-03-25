@@ -26,24 +26,68 @@ import ru.mike.study.studyai.data.toData
 import ru.mike.study.studyai.mcp.McpManager
 import ru.mike.study.studyai.mcp.McpLogger
 import ru.mike.study.studyai.mcp.WeatherNotificationClient
+import ru.mike.study.studyai.config.AppSettings
+import ru.mike.study.studyai.config.AppSettingsStore
+import ru.mike.study.studyai.config.LlmProvider
+import ru.mike.study.studyai.config.OllamaManager
+import kotlinx.coroutines.Dispatchers
 import ru.mike.study.studyai.rag.RagMode
 import ru.mike.study.studyai.rag.RagService
 import ru.mike.study.studyai.storage.ChatStorage
 import java.util.UUID
 
-class ChatViewModel(apiKey: String) : ViewModel() {
+class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
 
-    private val openAiService = OpenAiService(apiKey)
+    private val _appSettings = MutableStateFlow(AppSettingsStore.load())
+    val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
+
+    private var openAiService = createOpenAiService()
     private val chatStorage = ChatStorage()
     private val memoryService = openAiService.getMemoryService()
     private val mcpManager = McpManager()
     private val weatherNotificationClient = WeatherNotificationClient()
-    val ragService = RagService(apiKey)
+    var ragService = createRagService()
+        private set
+
+    private fun createOpenAiService(): OpenAiService {
+        val s = _appSettings.value
+        val key = if (s.provider == ru.mike.study.studyai.config.LlmProvider.OPENAI) openAiApiKey else ""
+        return OpenAiService(key, s.effectiveBaseUrl).also { service ->
+            service.setMemoryConfig(s.systemPromptEnabled, s.invariantsEnabled, s.profileMemoryEnabled)
+        }
+    }
+
+    private fun createRagService(): RagService = RagService(_appSettings.value, openAiApiKey)
+
+    fun updateSettings(settings: AppSettings) {
+        _appSettings.value = settings
+        AppSettingsStore.save(settings)
+        openAiService = createOpenAiService()
+        ragService = createRagService()
+        startOllamaIfNeeded(settings)
+        // Re-apply current chat context to the new service
+        val chat = _currentChat.value
+        if (chat != null) {
+            openAiService.setStrategy(_strategy.value)
+            openAiService.setSlidingWindowSize(_slidingWindowSize.value)
+            openAiService.setFacts(_facts.value)
+            openAiService.setTaskState(_taskState.value)
+            openAiService.setChatId(chat.id)
+        }
+    }
 
     private val _ragMode = MutableStateFlow(RagMode.MCP_TOOL)
     val ragMode: StateFlow<RagMode> = _ragMode.asStateFlow()
 
     fun setRagMode(mode: RagMode) { _ragMode.value = mode }
+
+    /** Возвращает модель для запроса: явно выбранная > модель провайдера */
+    private val effectiveModel: String?
+        get() = _model.value.ifBlank { null }
+            ?: when (_appSettings.value.provider) {
+                ru.mike.study.studyai.config.LlmProvider.OLLAMA -> _appSettings.value.ollamaChatModel
+                else -> null
+            }
 
     private val _ragMinScore = MutableStateFlow(0.3f)
     val ragMinScore: StateFlow<Float> = _ragMinScore.asStateFlow()
@@ -135,6 +179,15 @@ class ChatViewModel(apiKey: String) : ViewModel() {
         loadProfiles()
         loadChats()
         initWeatherNotifications()
+        startOllamaIfNeeded(_appSettings.value)
+    }
+
+    private fun startOllamaIfNeeded(settings: AppSettings) {
+        if (settings.provider == LlmProvider.OLLAMA) {
+            viewModelScope.launch(Dispatchers.IO) {
+                OllamaManager.ensureRunning(settings.ollamaBaseUrl)
+            }
+        }
     }
 
     private fun initWeatherNotifications() {
@@ -625,7 +678,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
             val branch2 = createBranch(currentChat.branches.size + 2)
 
             // Send 2 parallel requests
-            val result1 = openAiService.sendMessage(text, _temperature.value, _model.value.ifBlank { null })
+            val result1 = openAiService.sendMessage(text, _temperature.value, effectiveModel)
 
             // Clear and restore history for second request (to get different response)
             openAiService.clearHistory()
@@ -636,7 +689,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                     openAiService.addToHistory("assistant", msg.content)
                 }
             }
-            val result2 = openAiService.sendMessage(text, _temperature.value, _model.value.ifBlank { null })
+            val result2 = openAiService.sendMessage(text, _temperature.value, effectiveModel)
 
             _messages.value = _messages.value.dropLast(1) // Remove loading
 
@@ -757,7 +810,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                                 topK = _ragTopK.value,
                                 candidateK = _ragCandidateK.value,
                                 minScore = _ragMinScore.value,
-                                model = _model.value.ifBlank { "gpt-4o-mini" }
+                                model = effectiveModel ?: "gpt-4o-mini"
                             )
                             if (rewritten != text) {
                                 val rewriteMsg = ChatMessage(content = rewritten, isFromUser = true, isQueryRewrite = true)
@@ -780,7 +833,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                                 topK = _ragTopK.value,
                                 candidateK = _ragCandidateK.value,
                                 minScore = _ragMinScore.value,
-                                model = _model.value.ifBlank { "gpt-4o-mini" }
+                                model = effectiveModel ?: "gpt-4o-mini"
                             )
                             if (rewritten != text) {
                                 val rewriteMsg = ChatMessage(content = rewritten, isFromUser = true, isQueryRewrite = true)
@@ -820,7 +873,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                     text,
                     openAiTools,
                     _temperature.value,
-                    _model.value.ifBlank { null },
+                    effectiveModel,
                     ragSystemContext
                 )
 
@@ -865,7 +918,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
                     result = openAiService.continueWithToolResults(
                         toolResults,
                         _temperature.value,
-                        _model.value.ifBlank { null }
+                        effectiveModel
                     )
                 }
 
@@ -919,7 +972,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     }
 
     private suspend fun checkAndSummarizeIfNeeded() {
-        val summaryResult = openAiService.checkAndSummarize(_model.value.ifBlank { null })
+        val summaryResult = openAiService.checkAndSummarize(effectiveModel)
 
         if (summaryResult != null) {
             val newSummary = ChatSummaryData(
@@ -936,7 +989,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
 
     private suspend fun extractFactsIfNeeded() {
         // Extract facts after every assistant response
-        val factsResult = openAiService.extractFacts(_model.value.ifBlank { null })
+        val factsResult = openAiService.extractFacts(effectiveModel)
         if (factsResult != null) {
             _facts.value = factsResult.facts
             openAiService.setFacts(_facts.value)
@@ -946,7 +999,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
 
     private suspend fun extractMemoryLayersIfNeeded() {
         // Extract and update memory layers after every assistant response
-        val result = openAiService.extractMemoryUpdates(_model.value.ifBlank { null })
+        val result = openAiService.extractMemoryUpdates(effectiveModel)
         if (result.success) {
             println("Context management: Memory layers updated")
 
@@ -986,7 +1039,7 @@ class ChatViewModel(apiKey: String) : ViewModel() {
     }
 
     private suspend fun extractTaskStateIfNeeded() {
-        val result = openAiService.extractTaskState(_model.value.ifBlank { null })
+        val result = openAiService.extractTaskState(effectiveModel)
         if (result != null) {
             _taskState.value = result
             openAiService.setTaskState(result)

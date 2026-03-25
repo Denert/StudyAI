@@ -7,17 +7,20 @@ import java.io.File
 import kotlin.math.sqrt
 
 class VectorStore(
-    baseDir: String = System.getProperty("user.home") + "/.studyai/rag-index"
+    baseDir: String = System.getProperty("user.home") + "/.studyai/rag-index",
+    private val providerPrefix: String = "openai"
 ) {
     private val dir = File(baseDir).also { it.mkdirs() }
+
+    private fun indexFile(strategy: String) = File(dir, "${providerPrefix}_${strategy}_index.json")
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
     fun save(chunks: List<RagChunk>, strategy: String) {
-        File(dir, "${strategy}_index.json").writeText(json.encodeToString(chunks))
+        indexFile(strategy).writeText(json.encodeToString(chunks))
     }
 
     fun load(strategy: String): List<RagChunk> {
-        val file = File(dir, "${strategy}_index.json")
+        val file = indexFile(strategy)
         if (!file.exists()) return emptyList()
         return try {
             json.decodeFromString(file.readText())
@@ -50,7 +53,7 @@ class VectorStore(
             .take(topK)
     }
 
-    fun hasIndex(strategy: String): Boolean = File(dir, "${strategy}_index.json").exists()
+    fun hasIndex(strategy: String): Boolean = indexFile(strategy).exists()
 
     private fun cosineSimilarity(a: List<Float>, b: List<Float>): Float {
         var dot = 0f; var normA = 0f; var normB = 0f

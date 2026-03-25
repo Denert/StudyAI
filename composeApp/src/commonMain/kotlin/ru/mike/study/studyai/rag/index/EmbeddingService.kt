@@ -12,7 +12,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import ru.mike.study.studyai.rag.RagLogger
 
-class EmbeddingService(private val apiKey: String) {
+class EmbeddingService(
+    private val apiKey: String,
+    private val baseUrl: String = "https://api.openai.com",
+    private val embeddingModel: String = "text-embedding-3-small"
+) {
+    private val embeddingEndpoint = "$baseUrl/v1/embeddings"
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -30,7 +35,7 @@ class EmbeddingService(private val apiKey: String) {
     @Serializable
     private data class EmbeddingRequest(
         val input: List<String>,
-        val model: String = "text-embedding-3-small"
+        val model: String
     )
 
     @Serializable
@@ -50,10 +55,10 @@ class EmbeddingService(private val apiKey: String) {
         texts.chunked(100).forEachIndexed { batchIndex, batch ->
             RagLogger.log("Запрос эмбеддингов: батч $batchIndex, ${batch.size} текстов")
 
-            val httpResponse = client.post("https://api.openai.com/v1/embeddings") {
+            val httpResponse = client.post(embeddingEndpoint) {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
                 contentType(ContentType.Application.Json)
-                setBody(EmbeddingRequest(input = batch))
+                setBody(EmbeddingRequest(input = batch, model = embeddingModel))
             }
 
             val statusCode = httpResponse.status.value
