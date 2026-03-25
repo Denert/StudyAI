@@ -41,6 +41,7 @@ fun SettingsScreen(
     var isLoadingModels by remember { mutableStateOf(false) }
     var modelsError by remember { mutableStateOf("") }
     var showModelDropdown by remember { mutableStateOf(false) }
+    var showEmbeddingDropdown by remember { mutableStateOf(false) }
 
     fun loadModels() {
         scope.launch {
@@ -156,7 +157,7 @@ fun SettingsScreen(
                                 value = ollamaChatModel,
                                 onValueChange = { ollamaChatModel = it },
                                 label = { Text("Модель для чата") },
-                                supportingText = { Text("Пример: qwen2.5-coder:1.5b") },
+                                supportingText = { Text("Пример: llama3.1:8b") },
                                 modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
                                 singleLine = true,
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showModelDropdown) }
@@ -179,14 +180,39 @@ fun SettingsScreen(
                             }
                         }
 
-                        OutlinedTextField(
-                            value = ollamaEmbeddingModel,
-                            onValueChange = { ollamaEmbeddingModel = it },
-                            label = { Text("Модель для эмбеддингов (RAG)") },
-                            supportingText = { Text("Установите: ollama pull nomic-embed-text") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
+                        // Embedding model
+                        ExposedDropdownMenuBox(
+                            expanded = showEmbeddingDropdown,
+                            onExpandedChange = {
+                                if (availableModels.isNotEmpty()) showEmbeddingDropdown = it
+                            }
+                        ) {
+                            OutlinedTextField(
+                                value = ollamaEmbeddingModel,
+                                onValueChange = { ollamaEmbeddingModel = it },
+                                label = { Text("Модель для эмбеддингов (RAG)") },
+                                supportingText = { Text("Пример: nomic-embed-text") },
+                                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+                                singleLine = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showEmbeddingDropdown) }
+                            )
+                            if (availableModels.isNotEmpty()) {
+                                ExposedDropdownMenu(
+                                    expanded = showEmbeddingDropdown,
+                                    onDismissRequest = { showEmbeddingDropdown = false }
+                                ) {
+                                    availableModels.forEach { model ->
+                                        DropdownMenuItem(
+                                            text = { Text(model) },
+                                            onClick = {
+                                                ollamaEmbeddingModel = model
+                                                showEmbeddingDropdown = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
 
                         // Warning about re-indexing
                         Surface(

@@ -1054,7 +1054,8 @@ ${lastUserMessage.content}
             )
 
             // Check if there are tool calls
-            if (finishReason == "tool_calls" && message?.toolCalls != null) {
+            // Ollama may return finish_reason "stop" even for tool calls, so check toolCalls directly
+            if (message?.toolCalls != null && message.toolCalls.isNotEmpty()) {
                 println("🔧 Tool calls requested: ${message.toolCalls.map { it.function.name }}")
 
                 // Add assistant message with tool calls to history
@@ -1155,7 +1156,7 @@ ${lastUserMessage.content}
             )
 
             // Check if there are more tool calls
-            if (finishReason == "tool_calls" && message?.toolCalls != null) {
+            if (message?.toolCalls != null && message.toolCalls.isNotEmpty()) {
                 println("🔧 More tool calls requested: ${message.toolCalls.map { it.function.name }}")
                 allMessages.add(message)
 

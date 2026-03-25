@@ -7,17 +7,20 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import ru.mike.study.studyai.config.AppSettings
 import ru.mike.study.studyai.config.LlmProvider
+import ru.mike.study.studyai.config.OllamaManager
 import ru.mike.study.studyai.rag.chunking.FixedSizeChunker
 import ru.mike.study.studyai.rag.chunking.StructureChunker
 import ru.mike.study.studyai.rag.index.EmbeddingService
 import ru.mike.study.studyai.rag.index.VectorStore
 import java.io.File
 
-class RagService(settings: AppSettings, openAiApiKey: String) {
+class RagService(private val settings: AppSettings, openAiApiKey: String) {
 
     private val effectiveApiKey = if (settings.provider == LlmProvider.OPENAI) openAiApiKey else ""
 
@@ -80,6 +83,13 @@ class RagService(settings: AppSettings, openAiApiKey: String) {
         RagLogger.log("Всего чанков: ${allChunks.size}")
         onProgress("Генерирую эмбеддинги (${allChunks.size} чанков)...")
 
+        if (settings.provider == LlmProvider.OLLAMA) {
+            onProgress("Проверяю модель ${settings.effectiveEmbeddingModel}...")
+            withContext(Dispatchers.IO) {
+                OllamaManager.ensureModelAvailable(settings.ollamaBaseUrl, settings.effectiveEmbeddingModel)
+            }
+        }
+
         val embeddings = try {
             embeddingService.embedBatch(allChunks.map { it.content })
         } catch (e: Exception) {
@@ -109,6 +119,11 @@ class RagService(settings: AppSettings, openAiApiKey: String) {
     }
 
     suspend fun search(query: String, strategy: String, topK: Int = 5): List<Pair<RagChunk, Float>> {
+        if (settings.provider == LlmProvider.OLLAMA) {
+            withContext(Dispatchers.IO) {
+                OllamaManager.ensureModelAvailable(settings.ollamaBaseUrl, settings.effectiveEmbeddingModel)
+            }
+        }
         val queryEmbedding = embeddingService.embed(query)
         return vectorStore.search(queryEmbedding, strategy, topK)
     }

@@ -11,7 +11,7 @@ enum class LlmProvider { OPENAI, OLLAMA }
 data class AppSettings(
     val provider: LlmProvider = LlmProvider.OPENAI,
     val ollamaBaseUrl: String = "http://localhost:11434",
-    val ollamaChatModel: String = "qwen2.5-coder:1.5b",
+    val ollamaChatModel: String = "llama3.1:8b",
     val ollamaEmbeddingModel: String = "nomic-embed-text",
     val systemPromptEnabled: Boolean = true,
     val invariantsEnabled: Boolean = true,

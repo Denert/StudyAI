@@ -23,6 +23,7 @@ import ru.mike.study.studyai.data.TaskStateData
 import ru.mike.study.studyai.data.TaskPhase
 import ru.mike.study.studyai.data.toChatMessage
 import ru.mike.study.studyai.data.toData
+import ru.mike.study.studyai.mcp.McpConfigService
 import ru.mike.study.studyai.mcp.McpManager
 import ru.mike.study.studyai.mcp.McpLogger
 import ru.mike.study.studyai.mcp.WeatherNotificationClient
@@ -191,6 +192,14 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
     }
 
     private fun initWeatherNotifications() {
+        val isWeatherServerEnabled = McpConfigService().getServers()
+            .any { it.enabled && it.args.any { arg -> arg.contains("weather-scheduler-mcp") } }
+
+        if (!isWeatherServerEnabled) {
+            McpLogger.log("[WS Client] Weather scheduler MCP is disabled, skipping WebSocket connection")
+            return
+        }
+
         // Connect to WebSocket server for weather notifications
         weatherNotificationClient.connect(scope = viewModelScope)
 
@@ -771,8 +780,10 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
 
             try {
                 // Connect to MCP servers and get tools
+                // Ollama doesn't support OpenAI-style function calling — skip tools to avoid JSON responses
+                val isOllama = _appSettings.value.provider == ru.mike.study.studyai.config.LlmProvider.OLLAMA
                 mcpManager.connectAll()
-                val mcpTools = mcpManager.getAllTools()
+                val mcpTools = if (isOllama) emptyList() else mcpManager.getAllTools()
                 val openAiTools = mcpTools.map { toolWithServer ->
                     OpenAiTool(
                         function = OpenAiFunction(
@@ -850,19 +861,29 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
                         "$ragFormatInstruction\n\n$contextBlock"
                     }
                     RagMode.MCP_TOOL -> {
-                        // Add search_docs as a synthetic tool
-                        openAiTools.add(
-                            OpenAiTool(
-                                function = OpenAiFunction(
-                                    name = "search_docs",
-                                    description = "Поиск по локальному индексу документов. Используй когда нужно найти информацию из загруженных .md файлов.",
-                                    parameters = json.parseToJsonElement(
-                                        """{"type":"object","properties":{"query":{"type":"string","description":"Поисковый запрос"},"strategy":{"type":"string","enum":["fixed","structure"],"description":"Стратегия индексирования (по умолчанию fixed)"}},"required":["query"]}"""
+                        if (isOllama) {
+                            // Ollama doesn't support tool calling — inject RAG context directly
+                            val ctx = ragService.getContext(text, "fixed")
+                            val contextBlock = if (ctx.isBlank())
+                                "КОНТЕКСТ ИЗ ДОКУМЕНТОВ:\nДокументы не найдены."
+                            else
+                                "КОНТЕКСТ ИЗ ДОКУМЕНТОВ (используй как приоритетный источник):\n$ctx"
+                            "$ragFormatInstruction\n\n$contextBlock"
+                        } else {
+                            // Add search_docs as a synthetic tool for OpenAI-compatible models
+                            openAiTools.add(
+                                OpenAiTool(
+                                    function = OpenAiFunction(
+                                        name = "search_docs",
+                                        description = "Поиск по локальному индексу документов. Используй когда нужно найти информацию из загруженных .md файлов.",
+                                        parameters = json.parseToJsonElement(
+                                            """{"type":"object","properties":{"query":{"type":"string","description":"Поисковый запрос"},"strategy":{"type":"string","enum":["fixed","structure"],"description":"Стратегия индексирования (по умолчанию fixed)"}},"required":["query"]}"""
+                                        )
                                     )
                                 )
                             )
-                        )
-                        ragFormatInstruction
+                            ragFormatInstruction
+                        }
                     }
                 }
 
@@ -933,15 +954,16 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
                         )
                         _messages.value = _messages.value + aiMessage
 
-                        // Strategy-specific post-processing
-                        when (_strategy.value) {
-                            ContextStrategy.SUMMARY -> checkAndSummarizeIfNeeded()
-                            ContextStrategy.STICKY_FACTS -> extractFactsIfNeeded()
-                            ContextStrategy.MEMORY_LAYERS -> extractMemoryLayersIfNeeded()
-                            else -> { /* No post-processing */ }
+                        // Post-processing is skipped for local models (Ollama)
+                        if (_appSettings.value.provider != ru.mike.study.studyai.config.LlmProvider.OLLAMA) {
+                            when (_strategy.value) {
+                                ContextStrategy.SUMMARY -> checkAndSummarizeIfNeeded()
+                                ContextStrategy.STICKY_FACTS -> extractFactsIfNeeded()
+                                ContextStrategy.MEMORY_LAYERS -> extractMemoryLayersIfNeeded()
+                                else -> { /* No post-processing */ }
+                            }
+                            extractTaskStateIfNeeded()
                         }
-                        // Task state is extracted for all strategies
-                        extractTaskStateIfNeeded()
                     },
                     onFailure = { error ->
                         val errorMessage = ChatMessage(

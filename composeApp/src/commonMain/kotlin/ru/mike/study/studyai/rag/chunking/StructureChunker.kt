@@ -4,7 +4,7 @@ import ru.mike.study.studyai.rag.RagChunk
 import java.util.UUID
 
 class StructureChunker(
-    private val maxChunkSize: Int = 3000
+    private val maxChunkSize: Int = 1500
 ) : Chunker {
 
     override val strategyName = "structure"

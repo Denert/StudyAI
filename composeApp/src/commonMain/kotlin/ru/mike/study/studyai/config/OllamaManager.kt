@@ -45,6 +45,48 @@ object OllamaManager {
     }
 
     /**
+     * Проверяет, доступна ли модель, и скачивает её если нет.
+     * Вызывать из IO-потока.
+     */
+    fun ensureModelAvailable(baseUrl: String, modelName: String) {
+        if (isModelAvailable(baseUrl, modelName)) {
+            println("★ Модель $modelName уже доступна")
+            return
+        }
+        println("★ Модель $modelName не найдена — запускаю 'ollama pull $modelName'...")
+        try {
+            val pullProcess = ProcessBuilder("ollama", "pull", modelName)
+                .redirectErrorStream(true)
+                .start()
+            val output = pullProcess.inputStream.bufferedReader().readText()
+            val exitCode = pullProcess.waitFor()
+            if (exitCode == 0) {
+                println("★ Модель $modelName успешно загружена")
+            } else {
+                println("★ Ошибка при загрузке модели $modelName (код $exitCode): $output")
+            }
+        } catch (e: Exception) {
+            println("★ Не удалось загрузить модель $modelName: ${e.message}")
+        }
+    }
+
+    private fun isModelAvailable(baseUrl: String, modelName: String): Boolean {
+        return try {
+            val url = URL("$baseUrl/api/tags")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
+            conn.connect()
+            if (conn.responseCode != 200) return false
+            val body = conn.inputStream.bufferedReader().readText()
+            // Простая проверка вхождения имени модели в ответ
+            body.contains("\"$modelName\"") || body.contains("\"$modelName:")
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
      * Останавливает Ollama только если мы его сами запустили.
      */
     fun stopIfManaged() {

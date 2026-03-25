@@ -2,10 +2,12 @@ package ru.mike.study.studyai.rag.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ru.mike.study.studyai.rag.RagChunk
 import ru.mike.study.studyai.rag.RagLogger
 import ru.mike.study.studyai.rag.RagService
@@ -55,7 +57,7 @@ class RagViewModel(private val ragService: RagService) : ViewModel() {
     }
 
     fun indexAll() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _isIndexing.value = true
             _indexingLog.value = ""
             try {
@@ -80,7 +82,7 @@ class RagViewModel(private val ragService: RagService) : ViewModel() {
     }
 
     fun indexStrategy(strategy: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _isIndexing.value = true
             _indexingLog.value = ""
             try {
@@ -104,7 +106,7 @@ class RagViewModel(private val ragService: RagService) : ViewModel() {
     fun search(query: String) {
         if (query.isBlank()) return
         _searchQuery.value = query
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _isSearching.value = true
             try {
                 val results = mutableMapOf<String, List<Pair<RagChunk, Float>>>()
