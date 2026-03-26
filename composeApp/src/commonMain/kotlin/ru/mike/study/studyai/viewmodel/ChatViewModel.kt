@@ -128,8 +128,14 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _temperature = MutableStateFlow(1.0f)
+    private val _temperature = MutableStateFlow(_appSettings.value.temperature)
     val temperature: StateFlow<Float> = _temperature.asStateFlow()
+
+    private val _maxTokens = MutableStateFlow(_appSettings.value.maxTokens)
+    val maxTokens: StateFlow<Int> = _maxTokens.asStateFlow()
+
+    private val _numCtx = MutableStateFlow(_appSettings.value.numCtx)
+    val numCtx: StateFlow<Int> = _numCtx.asStateFlow()
 
     private val _model = MutableStateFlow("")
     val model: StateFlow<String> = _model.asStateFlow()
@@ -508,6 +514,19 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
         _temperature.value = value.coerceIn(0f, 2f)
     }
 
+    fun saveModelParams(temperature: Float, maxTokens: Int, numCtx: Int) {
+        _temperature.value = temperature.coerceIn(0f, 2f)
+        _maxTokens.value = maxTokens
+        _numCtx.value = numCtx
+        val updated = _appSettings.value.copy(
+            temperature = temperature.coerceIn(0f, 2f),
+            maxTokens = maxTokens,
+            numCtx = numCtx
+        )
+        _appSettings.value = updated
+        AppSettingsStore.save(updated)
+    }
+
     fun setModel(value: String) {
         _model.value = value
     }
@@ -687,7 +706,7 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
             val branch2 = createBranch(currentChat.branches.size + 2)
 
             // Send 2 parallel requests
-            val result1 = openAiService.sendMessage(text, _temperature.value, effectiveModel)
+            val result1 = openAiService.sendMessage(text, _temperature.value, effectiveModel, _maxTokens.value, _numCtx.value)
 
             // Clear and restore history for second request (to get different response)
             openAiService.clearHistory()
@@ -698,7 +717,7 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
                     openAiService.addToHistory("assistant", msg.content)
                 }
             }
-            val result2 = openAiService.sendMessage(text, _temperature.value, effectiveModel)
+            val result2 = openAiService.sendMessage(text, _temperature.value, effectiveModel, _maxTokens.value, _numCtx.value)
 
             _messages.value = _messages.value.dropLast(1) // Remove loading
 
@@ -895,7 +914,9 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
                     openAiTools,
                     _temperature.value,
                     effectiveModel,
-                    ragSystemContext
+                    ragSystemContext,
+                    _maxTokens.value,
+                    _numCtx.value
                 )
 
                 // Handle tool calls loop

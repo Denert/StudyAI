@@ -45,6 +45,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val temperature by viewModel.temperature.collectAsState()
+    val maxTokens by viewModel.maxTokens.collectAsState()
+    val numCtx by viewModel.numCtx.collectAsState()
     val model by viewModel.model.collectAsState()
     val strategy by viewModel.strategy.collectAsState()
     val slidingWindowSize by viewModel.slidingWindowSize.collectAsState()
@@ -67,6 +69,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var showRagDialog by remember { mutableStateOf(false) }
     var showTaskStateDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showModelParamsDialog by remember { mutableStateOf(false) }
     val taskState by viewModel.taskState.collectAsState()
     val appSettings by viewModel.appSettings.collectAsState()
     val ragMode by viewModel.ragMode.collectAsState()
@@ -115,6 +118,17 @@ fun ChatScreen(viewModel: ChatViewModel) {
             openAiApiKey = ApiConfig.apiKey,
             onSave = { viewModel.updateSettings(it) },
             onDismiss = { showSettingsDialog = false }
+        )
+    }
+
+    if (showModelParamsDialog) {
+        ModelParamsScreen(
+            temperature = temperature,
+            maxTokens = maxTokens,
+            numCtx = numCtx,
+            provider = appSettings.provider,
+            onSave = { t, mt, nc -> viewModel.saveModelParams(t, mt, nc) },
+            onDismiss = { showModelParamsDialog = false }
         )
     }
 
@@ -280,15 +294,17 @@ fun ChatScreen(viewModel: ChatViewModel) {
                             )
                         }
 
-                        // Temperature
-                        Text("T:${"%.1f".format(temperature)}", style = MaterialTheme.typography.labelSmall)
-                        Slider(
-                            value = temperature,
-                            onValueChange = { viewModel.setTemperature(it) },
-                            valueRange = 0f..2f,
-                            steps = 19,
-                            modifier = Modifier.weight(1f).height(20.dp)
-                        )
+                        // Model params button
+                        TextButton(
+                            onClick = { showModelParamsDialog = true },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text(
+                                "T:${"%.1f".format(temperature)}  tok:$maxTokens",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
 
                         // Strategy dropdown
                         StrategyDropdown(

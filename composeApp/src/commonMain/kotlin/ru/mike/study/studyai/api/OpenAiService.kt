@@ -152,7 +152,9 @@ class OpenAiService(
     suspend fun sendMessage(
         userMessage: String,
         temperature: Float = 1.0f,
-        model: String? = null
+        model: String? = null,
+        maxTokens: Int? = null,
+        numCtx: Int? = null
     ): Result<ChatResult> {
         return try {
             allMessages.add(OpenAiMessage(role = "user", content = userMessage))
@@ -165,7 +167,9 @@ class OpenAiService(
             val request = OpenAiRequest(
                 model = requestModel,
                 messages = contextMessages,
-                temperature = temperature
+                temperature = temperature,
+                maxTokens = maxTokens,
+                numCtx = numCtx
             )
 
             println("═══════════════════════════════════════════════════════════")
@@ -986,7 +990,9 @@ ${lastUserMessage.content}
         tools: List<OpenAiTool>,
         temperature: Float = 1.0f,
         model: String? = null,
-        ragSystemContext: String? = null
+        ragSystemContext: String? = null,
+        maxTokens: Int? = null,
+        numCtx: Int? = null
     ): Result<ChatResultWithTools> {
         return try {
             allMessages.add(OpenAiMessage(role = "user", content = userMessage))
@@ -1005,7 +1011,9 @@ ${lastUserMessage.content}
                 messages = contextMessages,
                 temperature = temperature,
                 tools = if (tools.isNotEmpty()) tools else null,
-                toolChoice = if (tools.isNotEmpty()) "auto" else null
+                toolChoice = if (tools.isNotEmpty()) "auto" else null,
+                maxTokens = maxTokens,
+                numCtx = numCtx
             )
 
             println("═══════════════════════════════════════════════════════════")

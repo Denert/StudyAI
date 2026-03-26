@@ -12,7 +12,11 @@ data class OpenAiRequest(
     val temperature: Float = 1.0f,
     val tools: List<OpenAiTool>? = null,
     @SerialName("tool_choice")
-    val toolChoice: String? = null  // "auto", "none", or specific tool
+    val toolChoice: String? = null,
+    @SerialName("max_tokens")
+    val maxTokens: Int? = null,
+    @SerialName("num_ctx")
+    val numCtx: Int? = null
 )
 
 @Serializable

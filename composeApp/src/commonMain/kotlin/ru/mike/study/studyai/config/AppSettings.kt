@@ -15,7 +15,10 @@ data class AppSettings(
     val ollamaEmbeddingModel: String = "nomic-embed-text",
     val systemPromptEnabled: Boolean = true,
     val invariantsEnabled: Boolean = true,
-    val profileMemoryEnabled: Boolean = true
+    val profileMemoryEnabled: Boolean = true,
+    val temperature: Float = 0.7f,
+    val maxTokens: Int = 2048,
+    val numCtx: Int = 4096
 ) {
     val effectiveBaseUrl: String get() = when (provider) {
         LlmProvider.OPENAI -> "https://api.openai.com"
