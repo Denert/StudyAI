@@ -37,7 +37,7 @@ import ru.mike.study.studyai.rag.RagService
 import ru.mike.study.studyai.storage.ChatStorage
 import java.util.UUID
 
-class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
+class ChatViewModel(private val openAiApiKey: String, private val localApiKey: String = "") : ViewModel() {
 
     private val _appSettings = MutableStateFlow(AppSettingsStore.load())
     val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
@@ -52,13 +52,29 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
 
     private fun createOpenAiService(): OpenAiService {
         val s = _appSettings.value
-        val key = if (s.provider == ru.mike.study.studyai.config.LlmProvider.OPENAI) openAiApiKey else ""
+        val key = when (s.provider) {
+            ru.mike.study.studyai.config.LlmProvider.OPENAI -> openAiApiKey
+            ru.mike.study.studyai.config.LlmProvider.LOCAL -> localApiKey
+            else -> ""
+        }
         return OpenAiService(key, s.effectiveBaseUrl).also { service ->
             service.setMemoryConfig(s.systemPromptEnabled, s.invariantsEnabled, s.profileMemoryEnabled)
         }
     }
 
-    private fun createRagService(): RagService = RagService(_appSettings.value, openAiApiKey)
+    private fun createRagService(): RagService {
+        val s = _appSettings.value
+        val key = when (s.provider) {
+            ru.mike.study.studyai.config.LlmProvider.OPENAI -> openAiApiKey
+            ru.mike.study.studyai.config.LlmProvider.LOCAL -> localApiKey
+            else -> openAiApiKey
+        }
+        return RagService(s, key)
+    }
+
+    fun saveLocalBaseUrl(url: String) {
+        AppSettingsStore.save(_appSettings.value.copy(localBaseUrl = url))
+    }
 
     fun updateSettings(settings: AppSettings) {
         _appSettings.value = settings
@@ -87,6 +103,7 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
         get() = _model.value.ifBlank { null }
             ?: when (_appSettings.value.provider) {
                 ru.mike.study.studyai.config.LlmProvider.OLLAMA -> _appSettings.value.ollamaChatModel
+                ru.mike.study.studyai.config.LlmProvider.LOCAL -> _appSettings.value.localChatModel.ifBlank { null }
                 else -> null
             }
 
@@ -102,10 +119,14 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
     private val _ragFilterEnabled = MutableStateFlow(true)
     val ragFilterEnabled: StateFlow<Boolean> = _ragFilterEnabled.asStateFlow()
 
+    private val _ragRewriteEnabled = MutableStateFlow(true)
+    val ragRewriteEnabled: StateFlow<Boolean> = _ragRewriteEnabled.asStateFlow()
+
     fun setRagMinScore(v: Float) { _ragMinScore.value = v.coerceIn(0f, 1f) }
     fun setRagTopK(v: Int) { _ragTopK.value = v.coerceIn(1, 50) }
     fun setRagCandidateK(v: Int) { _ragCandidateK.value = v.coerceIn(1, 100) }
     fun setRagFilterEnabled(v: Boolean) { _ragFilterEnabled.value = v }
+    fun setRagRewriteEnabled(v: Boolean) { _ragRewriteEnabled.value = v }
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -840,7 +861,8 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
                                 topK = _ragTopK.value,
                                 candidateK = _ragCandidateK.value,
                                 minScore = _ragMinScore.value,
-                                model = effectiveModel ?: "gpt-4o-mini"
+                                model = effectiveModel ?: "gpt-4o-mini",
+                                rewriteEnabled = _ragRewriteEnabled.value
                             )
                             if (rewritten != text) {
                                 val rewriteMsg = ChatMessage(content = rewritten, isFromUser = true, isQueryRewrite = true)
@@ -863,7 +885,8 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
                                 topK = _ragTopK.value,
                                 candidateK = _ragCandidateK.value,
                                 minScore = _ragMinScore.value,
-                                model = effectiveModel ?: "gpt-4o-mini"
+                                model = effectiveModel ?: "gpt-4o-mini",
+                                rewriteEnabled = _ragRewriteEnabled.value
                             )
                             if (rewritten != text) {
                                 val rewriteMsg = ChatMessage(content = rewritten, isFromUser = true, isQueryRewrite = true)
@@ -975,14 +998,17 @@ class ChatViewModel(private val openAiApiKey: String) : ViewModel() {
                         )
                         _messages.value = _messages.value + aiMessage
 
-                        // Post-processing is skipped for local models (Ollama)
-                        if (_appSettings.value.provider != ru.mike.study.studyai.config.LlmProvider.OLLAMA) {
+                        val settings = _appSettings.value
+                        val isNotOllama = settings.provider != ru.mike.study.studyai.config.LlmProvider.OLLAMA
+                        if (isNotOllama && settings.contextStrategyEnabled) {
                             when (_strategy.value) {
                                 ContextStrategy.SUMMARY -> checkAndSummarizeIfNeeded()
                                 ContextStrategy.STICKY_FACTS -> extractFactsIfNeeded()
                                 ContextStrategy.MEMORY_LAYERS -> extractMemoryLayersIfNeeded()
                                 else -> { /* No post-processing */ }
                             }
+                        }
+                        if (isNotOllama && settings.taskStateExtractionEnabled) {
                             extractTaskStateIfNeeded()
                         }
                     },

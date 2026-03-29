@@ -5,7 +5,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 @Serializable
-enum class LlmProvider { OPENAI, OLLAMA }
+enum class LlmProvider { OPENAI, OLLAMA, LOCAL }
 
 @Serializable
 data class AppSettings(
@@ -13,9 +13,14 @@ data class AppSettings(
     val ollamaBaseUrl: String = "http://localhost:11434",
     val ollamaChatModel: String = "llama3.1:8b",
     val ollamaEmbeddingModel: String = "nomic-embed-text",
+    val localBaseUrl: String = "",
+    val localChatModel: String = "qwen3.5:9b",
+    val localEmbeddingModel: String = "nomic-embed-text",
     val systemPromptEnabled: Boolean = true,
     val invariantsEnabled: Boolean = true,
     val profileMemoryEnabled: Boolean = true,
+    val contextStrategyEnabled: Boolean = true,
+    val taskStateExtractionEnabled: Boolean = true,
     val temperature: Float = 0.7f,
     val maxTokens: Int = 2048,
     val numCtx: Int = 4096
@@ -23,16 +28,19 @@ data class AppSettings(
     val effectiveBaseUrl: String get() = when (provider) {
         LlmProvider.OPENAI -> "https://api.openai.com"
         LlmProvider.OLLAMA -> ollamaBaseUrl
+        LlmProvider.LOCAL -> localBaseUrl
     }
 
     val effectiveEmbeddingModel: String get() = when (provider) {
         LlmProvider.OPENAI -> "text-embedding-3-small"
         LlmProvider.OLLAMA -> ollamaEmbeddingModel
+        LlmProvider.LOCAL -> localEmbeddingModel
     }
 
     val providerPrefix: String get() = when (provider) {
         LlmProvider.OPENAI -> "openai"
         LlmProvider.OLLAMA -> "ollama"
+        LlmProvider.LOCAL -> "local"
     }
 }
 

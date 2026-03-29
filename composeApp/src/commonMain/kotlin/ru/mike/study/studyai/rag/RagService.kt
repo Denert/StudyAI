@@ -22,7 +22,10 @@ import java.io.File
 
 class RagService(private val settings: AppSettings, openAiApiKey: String) {
 
-    private val effectiveApiKey = if (settings.provider == LlmProvider.OPENAI) openAiApiKey else ""
+    private val effectiveApiKey = when (settings.provider) {
+        LlmProvider.OLLAMA -> ""
+        else -> openAiApiKey // works for both OPENAI and LOCAL (caller passes correct key)
+    }
 
     val docsDir = File(System.getProperty("user.home") + "/.studyai/rag-docs").also { it.mkdirs() }
     private val embeddingService = EmbeddingService(
@@ -39,7 +42,10 @@ class RagService(private val settings: AppSettings, openAiApiKey: String) {
     private val json = Json { ignoreUnknownKeys = true }
     private val httpClient = HttpClient {
         install(ContentNegotiation) { json(json) }
-        install(HttpTimeout) { requestTimeoutMillis = 30_000 }
+        install(HttpTimeout) {
+            connectTimeoutMillis = 10_000
+            requestTimeoutMillis = 30_000
+        }
     }
 
     @Serializable
@@ -64,7 +70,8 @@ class RagService(private val settings: AppSettings, openAiApiKey: String) {
         strategy: String,
         onProgress: (String) -> Unit = {}
     ): IndexStats {
-        val files = docsDir.listFiles { f -> f.extension == "md" } ?: emptyArray()
+        val files = docsDir.listFiles { f -> f.extension == "md" || f.extension == "pdf" }
+            ?: emptyArray()
         if (files.isEmpty()) return IndexStats(0, 0, strategy)
 
         val chunker = if (strategy == "fixed") fixedChunker else structureChunker
@@ -73,7 +80,18 @@ class RagService(private val settings: AppSettings, openAiApiKey: String) {
         for (file in files) {
             onProgress("Читаю: ${file.name}")
             RagLogger.log("Читаю файл: ${file.name} (${file.length()} байт)")
-            val text = file.readText()
+            val text = when (file.extension.lowercase()) {
+                "pdf" -> {
+                    onProgress("Извлекаю текст из PDF: ${file.name}")
+                    extractPdfText(file)
+                }
+                else -> file.readText()
+            }
+            if (text.isBlank()) {
+                RagLogger.log("Пропускаю ${file.name}: пустой текст")
+                onProgress("⚠ Пропускаю ${file.name}: не удалось извлечь текст")
+                continue
+            }
             RagLogger.log("Длина текста: ${text.length} символов")
             val chunks = chunker.chunk(text, file.name)
             RagLogger.log("Чанков из ${file.name}: ${chunks.size}")
@@ -164,10 +182,11 @@ class RagService(private val settings: AppSettings, openAiApiKey: String) {
         topK: Int = 5,
         candidateK: Int = 20,
         minScore: Float = 0.3f,
-        model: String = "gpt-4o-mini"
+        model: String = "gpt-4o-mini",
+        rewriteEnabled: Boolean = true
     ): Pair<String, String> {
-        val rewritten = rewriteQuery(query, model)
-        RagLogger.log("Переформулировано: \"$rewritten\"")
+        val rewritten = if (rewriteEnabled) rewriteQuery(query, model) else query
+        RagLogger.log(if (rewriteEnabled) "Переформулировано: \"$rewritten\"" else "Переформулировка отключена, запрос: \"$rewritten\"")
         val queryEmbedding = embeddingService.embed(rewritten)
         val results = vectorStore.searchWithFilter(queryEmbedding, strategy, candidateK, topK, minScore)
         RagLogger.log("Результатов после фильтра (minScore=$minScore): ${results.size} из $candidateK кандидатов")
@@ -183,5 +202,7 @@ class RagService(private val settings: AppSettings, openAiApiKey: String) {
     fun hasIndex(strategy: String): Boolean = vectorStore.hasIndex(strategy)
 
     fun getDocFiles(): List<String> =
-        docsDir.listFiles { f -> f.extension == "md" }?.map { it.name } ?: emptyList()
+        docsDir.listFiles { f -> f.extension == "md" || f.extension == "pdf" }
+            ?.sortedBy { it.name }
+            ?.map { it.name } ?: emptyList()
 }

@@ -21,7 +21,7 @@ fun App() {
                 .safeContentPadding(),
             color = MaterialTheme.colorScheme.background
         ) {
-            val viewModel = remember { ChatViewModel(ApiConfig.apiKey) }
+            val viewModel = remember { ChatViewModel(ApiConfig.apiKey, ApiConfig.localApiKey) }
             ChatScreen(viewModel)
         }
     }

@@ -77,6 +77,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val ragTopK by viewModel.ragTopK.collectAsState()
     val ragCandidateK by viewModel.ragCandidateK.collectAsState()
     val ragFilterEnabled by viewModel.ragFilterEnabled.collectAsState()
+    val ragRewriteEnabled by viewModel.ragRewriteEnabled.collectAsState()
 
     // MCP ViewModel
     val mcpViewModel = remember { McpViewModel() }
@@ -116,7 +117,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
         SettingsScreen(
             settings = appSettings,
             openAiApiKey = ApiConfig.apiKey,
+            localApiKey = ApiConfig.localApiKey,
             onSave = { viewModel.updateSettings(it) },
+            onLocalBaseUrlChange = { viewModel.saveLocalBaseUrl(it) },
             onDismiss = { showSettingsDialog = false }
         )
     }
@@ -183,10 +186,12 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     ragTopK = ragTopK,
                     ragCandidateK = ragCandidateK,
                     ragFilterEnabled = ragFilterEnabled,
+                    ragRewriteEnabled = ragRewriteEnabled,
                     onMinScoreChange = { viewModel.setRagMinScore(it) },
                     onTopKChange = { viewModel.setRagTopK(it) },
                     onCandidateKChange = { viewModel.setRagCandidateK(it) },
                     onFilterEnabledChange = { viewModel.setRagFilterEnabled(it) },
+                    onRewriteEnabledChange = { viewModel.setRagRewriteEnabled(it) },
                     onDismiss = { showRagDialog = false }
                 )
             }

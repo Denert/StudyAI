@@ -29,10 +29,12 @@ fun RagScreen(
     ragTopK: Int = 5,
     ragCandidateK: Int = 20,
     ragFilterEnabled: Boolean = true,
+    ragRewriteEnabled: Boolean = true,
     onMinScoreChange: (Float) -> Unit = {},
     onTopKChange: (Int) -> Unit = {},
     onCandidateKChange: (Int) -> Unit = {},
     onFilterEnabledChange: (Boolean) -> Unit = {},
+    onRewriteEnabledChange: (Boolean) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val isIndexing by viewModel.isIndexing.collectAsState()
@@ -112,10 +114,12 @@ fun RagScreen(
                     ragTopK = ragTopK,
                     ragCandidateK = ragCandidateK,
                     ragFilterEnabled = ragFilterEnabled,
+                    ragRewriteEnabled = ragRewriteEnabled,
                     onMinScoreChange = onMinScoreChange,
                     onTopKChange = onTopKChange,
                     onCandidateKChange = onCandidateKChange,
-                    onFilterEnabledChange = onFilterEnabledChange
+                    onFilterEnabledChange = onFilterEnabledChange,
+                    onRewriteEnabledChange = onRewriteEnabledChange
                 )
             }
         }
@@ -128,10 +132,12 @@ private fun SearchSettingsTab(
     ragTopK: Int,
     ragCandidateK: Int,
     ragFilterEnabled: Boolean,
+    ragRewriteEnabled: Boolean,
     onMinScoreChange: (Float) -> Unit,
     onTopKChange: (Int) -> Unit,
     onCandidateKChange: (Int) -> Unit,
-    onFilterEnabledChange: (Boolean) -> Unit
+    onFilterEnabledChange: (Boolean) -> Unit,
+    onRewriteEnabledChange: (Boolean) -> Unit
 ) {
     var minScoreText by remember(ragMinScore) { mutableStateOf(ragMinScore.toString()) }
     var topKText by remember(ragTopK) { mutableStateOf(ragTopK.toString()) }
@@ -152,9 +158,9 @@ private fun SearchSettingsTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text("Фильтрация и rewrite запроса", style = MaterialTheme.typography.bodyMedium)
+                Text("Фильтрация результатов", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    if (ragFilterEnabled) "Включено: rewrite + candidateK → minScore → topK"
+                    if (ragFilterEnabled) "Включено: candidateK → minScore → topK"
                     else "Выключено: простой поиск top-5",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -163,10 +169,31 @@ private fun SearchSettingsTab(
             Switch(checked = ragFilterEnabled, onCheckedChange = onFilterEnabledChange)
         }
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Переформулировка запроса (rewrite)", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (ragRewriteEnabled) "Включено: запрос оптимизируется через LLM перед поиском"
+                    else "Выключено: поиск по исходному запросу",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = ragRewriteEnabled,
+                onCheckedChange = onRewriteEnabledChange,
+                enabled = ragFilterEnabled
+            )
+        }
+
         HorizontalDivider()
 
         Text(
-            "Применяются только в режимах «Только RAG» и «RAG + Модель». Запрос автоматически переформулируется через LLM перед поиском.",
+            "Применяются только в режимах «Только RAG» и «RAG + Модель».",
             style = MaterialTheme.typography.bodySmall,
             color = if (ragFilterEnabled) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
@@ -218,8 +245,11 @@ private fun SearchSettingsTab(
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Текущие значения", style = MaterialTheme.typography.labelMedium)
                 Text(
-                    if (ragFilterEnabled) "candidateK = $ragCandidateK → фильтр minScore ≥ $ragMinScore → topK = $ragTopK"
-                    else "фильтр выключен — простой поиск top-5",
+                    when {
+                        !ragFilterEnabled -> "фильтр выключен — простой поиск top-5"
+                        ragRewriteEnabled -> "rewrite → candidateK = $ragCandidateK → minScore ≥ $ragMinScore → topK = $ragTopK"
+                        else -> "candidateK = $ragCandidateK → minScore ≥ $ragMinScore → topK = $ragTopK (без rewrite)"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )

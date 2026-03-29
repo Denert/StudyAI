@@ -24,7 +24,9 @@ import ru.mike.study.studyai.config.LlmProvider
 fun SettingsScreen(
     settings: AppSettings,
     openAiApiKey: String,
+    localApiKey: String,
     onSave: (AppSettings) -> Unit,
+    onLocalBaseUrlChange: (String) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -33,15 +35,25 @@ fun SettingsScreen(
     var ollamaBaseUrl by remember(settings) { mutableStateOf(settings.ollamaBaseUrl) }
     var ollamaChatModel by remember(settings) { mutableStateOf(settings.ollamaChatModel) }
     var ollamaEmbeddingModel by remember(settings) { mutableStateOf(settings.ollamaEmbeddingModel) }
+    var localBaseUrl by remember(settings) { mutableStateOf(settings.localBaseUrl) }
+    var localChatModel by remember(settings) { mutableStateOf(settings.localChatModel) }
+    var localEmbeddingModel by remember(settings) { mutableStateOf(settings.localEmbeddingModel) }
     var systemPromptEnabled by remember(settings) { mutableStateOf(settings.systemPromptEnabled) }
     var invariantsEnabled by remember(settings) { mutableStateOf(settings.invariantsEnabled) }
     var profileMemoryEnabled by remember(settings) { mutableStateOf(settings.profileMemoryEnabled) }
+    var contextStrategyEnabled by remember(settings) { mutableStateOf(settings.contextStrategyEnabled) }
+    var taskStateExtractionEnabled by remember(settings) { mutableStateOf(settings.taskStateExtractionEnabled) }
 
     var availableModels by remember { mutableStateOf<List<String>>(emptyList()) }
     var isLoadingModels by remember { mutableStateOf(false) }
     var modelsError by remember { mutableStateOf("") }
     var showModelDropdown by remember { mutableStateOf(false) }
     var showEmbeddingDropdown by remember { mutableStateOf(false) }
+    var showLocalModelDropdown by remember { mutableStateOf(false) }
+    var showLocalEmbeddingDropdown by remember { mutableStateOf(false) }
+    val localEmbeddingModels = listOf("nomic-embed-text", "mxbai-embed-large")
+    var localHealthStatus by remember { mutableStateOf<Boolean?>(null) }
+    var isCheckingHealth by remember { mutableStateOf(false) }
 
     fun loadModels() {
         scope.launch {
@@ -54,6 +66,28 @@ fun SettingsScreen(
                 availableModels = models
             }
             isLoadingModels = false
+        }
+    }
+
+    fun loadLocalModels() {
+        scope.launch {
+            isLoadingModels = true
+            modelsError = ""
+            val models = ApiConfig.fetchLocalModels(localBaseUrl, localApiKey)
+            if (models.isEmpty()) {
+                modelsError = "Модели не найдены. Проверьте URL и ключ."
+            } else {
+                availableModels = models
+            }
+            isLoadingModels = false
+        }
+    }
+
+    fun checkHealth() {
+        scope.launch {
+            isCheckingHealth = true
+            localHealthStatus = ApiConfig.checkLocalHealth(localBaseUrl, localApiKey)
+            isCheckingHealth = false
         }
     }
 
@@ -96,6 +130,11 @@ fun SettingsScreen(
                             if (availableModels.isEmpty()) loadModels()
                         },
                         label = { Text("Ollama (локальная)") }
+                    )
+                    FilterChip(
+                        selected = provider == LlmProvider.LOCAL,
+                        onClick = { provider = LlmProvider.LOCAL },
+                        label = { Text("Local (Tunnel)") }
                     )
                 }
 
@@ -227,6 +266,136 @@ fun SettingsScreen(
                             )
                         }
                     }
+
+                    LlmProvider.LOCAL -> {
+                        // API Key (read-only from local.properties)
+                        Text("API Key (LOCAL_API_KEY)", style = MaterialTheme.typography.labelMedium)
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = if (localApiKey.isNotBlank())
+                                    "${localApiKey.take(8)}…"
+                                else "Не задан (проверьте local.properties → LOCAL_API_KEY)",
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (localApiKey.isNotBlank())
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.error
+                            )
+                        }
+
+                        // Base URL + Health check
+                        OutlinedTextField(
+                            value = localBaseUrl,
+                            onValueChange = {
+                                localBaseUrl = it
+                                localHealthStatus = null
+                                onLocalBaseUrlChange(it)
+                            },
+                            label = { Text("URL туннеля") },
+                            supportingText = { Text("Пример: https://xxxx.trycloudflare.com") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = { if (localBaseUrl.isNotBlank()) checkHealth() }) {
+                                    if (isCheckingHealth) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(Icons.Default.Refresh, contentDescription = "Проверить /health")
+                                    }
+                                }
+                            }
+                        )
+
+                        localHealthStatus?.let { ok ->
+                            Text(
+                                if (ok) "✓ Сервер доступен" else "✗ Сервер недоступен",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            )
+                        }
+
+                        if (modelsError.isNotBlank()) {
+                            Text(modelsError, color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+
+                        // Chat model dropdown
+                        ExposedDropdownMenuBox(
+                            expanded = showLocalModelDropdown,
+                            onExpandedChange = {
+                                if (availableModels.isNotEmpty()) showLocalModelDropdown = it
+                            }
+                        ) {
+                            OutlinedTextField(
+                                value = localChatModel,
+                                onValueChange = { localChatModel = it },
+                                label = { Text("Модель для чата") },
+                                supportingText = { Text("Введите вручную или загрузите список") },
+                                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+                                singleLine = true,
+                                trailingIcon = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = { if (localBaseUrl.isNotBlank()) loadLocalModels() }) {
+                                            if (isLoadingModels) {
+                                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                            } else {
+                                                Icon(Icons.Default.Refresh, contentDescription = "Загрузить модели")
+                                            }
+                                        }
+                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = showLocalModelDropdown)
+                                    }
+                                }
+                            )
+                            if (availableModels.isNotEmpty()) {
+                                ExposedDropdownMenu(
+                                    expanded = showLocalModelDropdown,
+                                    onDismissRequest = { showLocalModelDropdown = false }
+                                ) {
+                                    availableModels.forEach { model ->
+                                        DropdownMenuItem(
+                                            text = { Text(model) },
+                                            onClick = {
+                                                localChatModel = model
+                                                showLocalModelDropdown = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Embedding model dropdown
+                        ExposedDropdownMenuBox(
+                            expanded = showLocalEmbeddingDropdown,
+                            onExpandedChange = { showLocalEmbeddingDropdown = it }
+                        ) {
+                            OutlinedTextField(
+                                value = localEmbeddingModel,
+                                onValueChange = { localEmbeddingModel = it },
+                                label = { Text("Модель для эмбеддингов (RAG)") },
+                                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+                                singleLine = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showLocalEmbeddingDropdown) }
+                            )
+                            ExposedDropdownMenu(
+                                expanded = showLocalEmbeddingDropdown,
+                                onDismissRequest = { showLocalEmbeddingDropdown = false }
+                            ) {
+                                localEmbeddingModels.forEach { model ->
+                                    DropdownMenuItem(
+                                        text = { Text(model) },
+                                        onClick = {
+                                            localEmbeddingModel = model
+                                            showLocalEmbeddingDropdown = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 HorizontalDivider()
@@ -257,6 +426,22 @@ fun SettingsScreen(
                     Text("Профиль пользователя", style = MaterialTheme.typography.bodyMedium)
                     Switch(checked = profileMemoryEnabled, onCheckedChange = { profileMemoryEnabled = it })
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Обновление контекста (+1 запрос)", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = contextStrategyEnabled, onCheckedChange = { contextStrategyEnabled = it })
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Извлечение состояния задачи (+1 запрос)", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = taskStateExtractionEnabled, onCheckedChange = { taskStateExtractionEnabled = it })
+                }
 
                 HorizontalDivider()
 
@@ -275,9 +460,14 @@ fun SettingsScreen(
                                 ollamaBaseUrl = ollamaBaseUrl,
                                 ollamaChatModel = ollamaChatModel,
                                 ollamaEmbeddingModel = ollamaEmbeddingModel,
+                                localBaseUrl = localBaseUrl,
+                                localChatModel = localChatModel,
+                                localEmbeddingModel = localEmbeddingModel,
                                 systemPromptEnabled = systemPromptEnabled,
                                 invariantsEnabled = invariantsEnabled,
-                                profileMemoryEnabled = profileMemoryEnabled
+                                profileMemoryEnabled = profileMemoryEnabled,
+                                contextStrategyEnabled = contextStrategyEnabled,
+                                taskStateExtractionEnabled = taskStateExtractionEnabled
                             )
                         )
                         onDismiss()

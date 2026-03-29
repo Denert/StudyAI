@@ -21,7 +21,10 @@
       "Bash(grep -n \"^\\\\\\([0-9]\\\\{1,3\\\\}\\\\\\) \\\\\\([А-ЯЁA-Z]\\\\\\)\" /Users/mivelichko/.studyai/rag-docs/algs.md | head -60)",
       "Bash(find /Users/mivelichko/AndroidStudioProjects/StudyAI -name \"gradle.properties\" -o -name \"libs.versions.toml\" | xargs ls -la 2>/dev/null)",
       "Read(//Users/mivelichko/Library/**)",
-      "Read(//Users/mivelichko/.studyai/**)"
+      "Read(//Users/mivelichko/.studyai/**)",
+      "Bash(ls ~/.studyai/ 2>/dev/null && cat ~/.studyai/*.log 2>/dev/null || echo \"No logs found\")",
+      "Bash(ls ~/.studyai/logs/ 2>/dev/null && cat ~/.studyai/logs/*.log 2>/dev/null || echo \"No log files\")",
+      "Bash(grep -rn \"onKeyEvent\\\\|KeyEvent\\\\|Key\\\\.\" /Users/mivelichko/AndroidStudioProjects/StudyAI/composeApp/src/jvmMain --include=\"*.kt\" 2>/dev/null | head -30)"
     ]
   }
 }
