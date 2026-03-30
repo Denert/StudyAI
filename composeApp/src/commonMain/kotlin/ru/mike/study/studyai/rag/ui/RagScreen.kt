@@ -25,6 +25,7 @@ import ru.mike.study.studyai.rag.RagService
 @Composable
 fun RagScreen(
     viewModel: RagViewModel,
+    projectPath: String = "",
     ragMinScore: Float = 0.3f,
     ragTopK: Int = 5,
     ragCandidateK: Int = 20,
@@ -91,10 +92,12 @@ fun RagScreen(
                     docFiles = docFiles,
                     isIndexing = isIndexing,
                     indexingLog = indexingLog,
+                    projectPath = projectPath,
                     onRefresh = { viewModel.refreshDocFiles() },
                     onIndexAll = { viewModel.indexAll() },
                     onIndexFixed = { viewModel.indexStrategy("fixed") },
-                    onIndexStructure = { viewModel.indexStrategy("structure") }
+                    onIndexStructure = { viewModel.indexStrategy("structure") },
+                    onSyncProject = { viewModel.syncProjectDocs(projectPath) {} }
                 )
                 1 -> ComparisonTab(
                     fixedStats = fixedStats,
@@ -264,10 +267,12 @@ private fun DocumentsTab(
     docFiles: List<String>,
     isIndexing: Boolean,
     indexingLog: String,
+    projectPath: String = "",
     onRefresh: () -> Unit,
     onIndexAll: () -> Unit,
     onIndexFixed: () -> Unit,
-    onIndexStructure: () -> Unit
+    onIndexStructure: () -> Unit,
+    onSyncProject: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -327,6 +332,20 @@ private fun DocumentsTab(
         }
 
         HorizontalDivider()
+
+        // Project sync
+        if (projectPath.isNotBlank()) {
+            val projectName = projectPath.trimEnd('/').substringAfterLast('/')
+            Text("Проект: $projectName", style = MaterialTheme.typography.titleSmall)
+            Button(
+                onClick = onSyncProject,
+                enabled = !isIndexing,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Синхронизировать документы из проекта")
+            }
+            HorizontalDivider()
+        }
 
         // Index buttons
         Text("Индексация", style = MaterialTheme.typography.titleSmall)

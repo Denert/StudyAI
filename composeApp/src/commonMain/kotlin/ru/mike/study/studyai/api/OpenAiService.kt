@@ -58,12 +58,14 @@ class OpenAiService(
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
+        explicitNulls = false
     }
 
     private val jsonPretty = Json {
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
+        explicitNulls = false
         prettyPrint = true
     }
 

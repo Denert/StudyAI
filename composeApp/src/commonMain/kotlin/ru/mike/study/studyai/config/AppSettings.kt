@@ -13,6 +13,7 @@ data class AppSettings(
     val ollamaBaseUrl: String = "http://localhost:11434",
     val ollamaChatModel: String = "llama3.1:8b",
     val ollamaEmbeddingModel: String = "nomic-embed-text",
+    val projectPath: String = "",
     val localBaseUrl: String = "",
     val localChatModel: String = "qwen3.5:9b",
     val localEmbeddingModel: String = "nomic-embed-text",

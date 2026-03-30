@@ -158,6 +158,11 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
     private val _numCtx = MutableStateFlow(_appSettings.value.numCtx)
     val numCtx: StateFlow<Int> = _numCtx.asStateFlow()
 
+    /** num_ctx передаётся только Ollama — OpenAI и LOCAL возвращают null (не знают этот параметр) */
+    private val effectiveNumCtx: Int?
+        get() = if (_appSettings.value.provider == ru.mike.study.studyai.config.LlmProvider.OLLAMA)
+            _numCtx.value else null
+
     private val _model = MutableStateFlow("")
     val model: StateFlow<String> = _model.asStateFlow()
 
@@ -692,8 +697,15 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
 
     // ==================== SEND MESSAGE ====================
 
-    fun sendMessage(text: String) {
-        if (text.isBlank() || _isLoading.value) return
+    fun sendMessage(rawText: String) {
+        if (rawText.isBlank() || _isLoading.value) return
+
+        // /help command: switch to RAG_PLUS_MODEL and inject project system prompt
+        val isHelp = rawText.trimStart().startsWith("/help")
+        val text = if (isHelp) rawText.trimStart().removePrefix("/help").trim().ifBlank { "Расскажи о проекте" } else rawText
+        if (isHelp) {
+            _ragMode.value = RagMode.RAG_PLUS_MODEL
+        }
 
         val shouldBranch = _checkpointIndex.value != null &&
                 _strategy.value == ContextStrategy.BRANCHING &&
@@ -727,7 +739,7 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
             val branch2 = createBranch(currentChat.branches.size + 2)
 
             // Send 2 parallel requests
-            val result1 = openAiService.sendMessage(text, _temperature.value, effectiveModel, _maxTokens.value, _numCtx.value)
+            val result1 = openAiService.sendMessage(text, _temperature.value, effectiveModel, _maxTokens.value, effectiveNumCtx)
 
             // Clear and restore history for second request (to get different response)
             openAiService.clearHistory()
@@ -738,7 +750,7 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                     openAiService.addToHistory("assistant", msg.content)
                 }
             }
-            val result2 = openAiService.sendMessage(text, _temperature.value, effectiveModel, _maxTokens.value, _numCtx.value)
+            val result2 = openAiService.sendMessage(text, _temperature.value, effectiveModel, _maxTokens.value, effectiveNumCtx)
 
             _messages.value = _messages.value.dropLast(1) // Remove loading
 
@@ -900,7 +912,17 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                             "КОНТЕКСТ ИЗ ДОКУМЕНТОВ:\nДокументы не найдены."
                         else
                             "КОНТЕКСТ ИЗ ДОКУМЕНТОВ (используй как приоритетный источник, можешь дополнять своими знаниями):\n$ctx"
-                        "$ragFormatInstruction\n\n$contextBlock"
+                        val projectPrefix = if (_appSettings.value.projectPath.isNotBlank()) {
+                            val projectPath = _appSettings.value.projectPath
+                            val projectName = projectPath.trimEnd('/').substringAfterLast('/').ifBlank { "проекта" }
+                            val readme = java.io.File(projectPath, "README.md")
+                                .takeIf { it.exists() }
+                                ?.readText()
+                                ?.take(3000)
+                                ?.let { "\n\nREADME проекта:\n$it" } ?: ""
+                            "Ты ассистент разработчика проекта $projectName. Отвечай на вопросы о структуре, архитектуре и коде проекта, используя документацию.$readme\n\n"
+                        } else ""
+                        "$projectPrefix$ragFormatInstruction\n\n$contextBlock"
                     }
                     RagMode.MCP_TOOL -> {
                         if (isOllama) {
@@ -929,6 +951,30 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                     }
                 }
 
+                // Add project tools in any non-Ollama mode when projectPath is configured
+                if (!isOllama && _appSettings.value.projectPath.isNotBlank()) {
+                    openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                        name = "git_branch",
+                        description = "Возвращает список веток git в проекте.",
+                        parameters = json.parseToJsonElement("""{"type":"object","properties":{}}""")
+                    )))
+                    openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                        name = "git_status",
+                        description = "Возвращает статус изменённых файлов в проекте (git status --short).",
+                        parameters = json.parseToJsonElement("""{"type":"object","properties":{}}""")
+                    )))
+                    openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                        name = "git_diff",
+                        description = "Возвращает краткий diff изменений в проекте (git diff HEAD --stat).",
+                        parameters = json.parseToJsonElement("""{"type":"object","properties":{}}""")
+                    )))
+                    openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                        name = "list_files",
+                        description = "Возвращает список .kt файлов проекта.",
+                        parameters = json.parseToJsonElement("""{"type":"object","properties":{}}""")
+                    )))
+                }
+
                 McpLogger.log("Sending message with ${openAiTools.size} tools (RAG mode: ${_ragMode.value})")
 
                 // Send message with tools (inject RAG context if needed)
@@ -939,7 +985,7 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                     effectiveModel,
                     ragSystemContext,
                     _maxTokens.value,
-                    _numCtx.value
+                    effectiveNumCtx
                 )
 
                 // Handle tool calls loop
@@ -967,6 +1013,8 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                             val strategy = arguments?.get("strategy")?.toString()?.trim('"') ?: "fixed"
                             val ctx = ragService.getContext(query, strategy)
                             if (ctx.isBlank()) "Документы по запросу не найдены." else ctx
+                        } else if (toolName in listOf("git_branch", "git_status", "git_diff", "list_files")) {
+                            runProjectTool(toolName, _appSettings.value.projectPath)
                         } else {
                             val toolResult = mcpManager.callTool(toolName, arguments)
                             toolResult.fold(
@@ -1113,6 +1161,27 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
             _taskState.value = result
             openAiService.setTaskState(result)
             println("TaskState updated: goal=${result.goal}, clarifications=${result.clarifications.size}, constraints=${result.constraints.size}")
+        }
+    }
+
+    private fun runProjectTool(toolName: String, projectPath: String): String {
+        if (projectPath.isBlank()) return "Путь к проекту не задан."
+        return try {
+            val (cmd, args) = when (toolName) {
+                "git_branch" -> "git" to listOf("-C", projectPath, "branch", "-a")
+                "git_status" -> "git" to listOf("-C", projectPath, "status", "--short")
+                "git_diff"   -> "git" to listOf("-C", projectPath, "diff", "HEAD", "--stat")
+                "list_files" -> "find" to listOf(projectPath, "-name", "*.kt", "-not", "-path", "*/build/*")
+                else -> return "Неизвестный инструмент: $toolName"
+            }
+            val process = ProcessBuilder(listOf(cmd) + args)
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            output.ifBlank { "(пусто)" }
+        } catch (e: Exception) {
+            "Ошибка выполнения $toolName: ${e.message}"
         }
     }
 

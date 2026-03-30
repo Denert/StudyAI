@@ -38,6 +38,7 @@ fun SettingsScreen(
     var localBaseUrl by remember(settings) { mutableStateOf(settings.localBaseUrl) }
     var localChatModel by remember(settings) { mutableStateOf(settings.localChatModel) }
     var localEmbeddingModel by remember(settings) { mutableStateOf(settings.localEmbeddingModel) }
+    var projectPath by remember(settings) { mutableStateOf(settings.projectPath) }
     var systemPromptEnabled by remember(settings) { mutableStateOf(settings.systemPromptEnabled) }
     var invariantsEnabled by remember(settings) { mutableStateOf(settings.invariantsEnabled) }
     var profileMemoryEnabled by remember(settings) { mutableStateOf(settings.profileMemoryEnabled) }
@@ -400,6 +401,19 @@ fun SettingsScreen(
 
                 HorizontalDivider()
 
+                // Project
+                Text("Проект (для /help и RAG)", style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = projectPath,
+                    onValueChange = { projectPath = it },
+                    label = { Text("Путь к проекту") },
+                    supportingText = { Text("Пример: /Users/user/Projects/MyApp") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                HorizontalDivider()
+
                 // Memory / prompts
                 Text("Память и промпты", style = MaterialTheme.typography.titleSmall)
                 Row(
@@ -457,6 +471,7 @@ fun SettingsScreen(
                         onSave(
                             AppSettings(
                                 provider = provider,
+                                projectPath = projectPath,
                                 ollamaBaseUrl = ollamaBaseUrl,
                                 ollamaChatModel = ollamaChatModel,
                                 ollamaEmbeddingModel = ollamaEmbeddingModel,

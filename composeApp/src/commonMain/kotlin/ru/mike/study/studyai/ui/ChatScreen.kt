@@ -182,6 +182,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
             ) {
                 RagScreen(
                     viewModel = ragViewModel,
+                    projectPath = appSettings.projectPath,
                     ragMinScore = ragMinScore,
                     ragTopK = ragTopK,
                     ragCandidateK = ragCandidateK,
@@ -1459,8 +1460,10 @@ fun ChatMessageItem(
             )
         } else if (message.metadata != null) {
             val meta = message.metadata
+            val timeStr = if (meta.responseTimeMs < 1000) "${meta.responseTimeMs}ms"
+                          else "${"%.1f".format(meta.responseTimeMs / 1000.0)}s"
             Text(
-                text = "${meta.totalTokens} tokens | ${String.format("%.4f", meta.costRub)} ₽",
+                text = "${meta.totalTokens} tokens | ${String.format("%.4f", meta.costRub)} ₽ | $timeStr",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp)

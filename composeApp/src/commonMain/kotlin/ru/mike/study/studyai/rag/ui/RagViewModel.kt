@@ -56,6 +56,14 @@ class RagViewModel(private val ragService: RagService) : ViewModel() {
         _docFiles.value = ragService.getDocFiles()
     }
 
+    fun syncProjectDocs(projectPath: String, onResult: (List<String>) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val copied = ragService.syncProjectDocs(projectPath)
+            refreshDocFiles()
+            withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(copied) }
+        }
+    }
+
     fun indexAll() {
         viewModelScope.launch(Dispatchers.IO) {
             _isIndexing.value = true

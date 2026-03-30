@@ -201,6 +201,38 @@ class RagService(private val settings: AppSettings, openAiApiKey: String) {
 
     fun hasIndex(strategy: String): Boolean = vectorStore.hasIndex(strategy)
 
+    fun syncProjectDocs(projectPath: String): List<String> {
+        val projectDir = java.io.File(projectPath)
+        if (!projectDir.exists() || !projectDir.isDirectory) return emptyList()
+
+        val projectName = projectDir.name
+        val prefix = "project_${projectName}_"
+        val copied = mutableListOf<String>()
+
+        // Remove old project files for this project
+        docsDir.listFiles { f -> f.name.startsWith(prefix) }?.forEach { it.delete() }
+
+        // Copy README.md
+        val readme = java.io.File(projectDir, "README.md")
+        if (readme.exists()) {
+            val dest = java.io.File(docsDir, "${prefix}README.md")
+            readme.copyTo(dest, overwrite = true)
+            copied.add(dest.name)
+        }
+
+        // Copy docs/*.md
+        val docsFolder = java.io.File(projectDir, "docs")
+        if (docsFolder.exists() && docsFolder.isDirectory) {
+            docsFolder.listFiles { f -> f.extension == "md" }?.forEach { file ->
+                val dest = java.io.File(docsDir, "$prefix${file.name}")
+                file.copyTo(dest, overwrite = true)
+                copied.add(dest.name)
+            }
+        }
+
+        return copied
+    }
+
     fun getDocFiles(): List<String> =
         docsDir.listFiles { f -> f.extension == "md" || f.extension == "pdf" }
             ?.sortedBy { it.name }
