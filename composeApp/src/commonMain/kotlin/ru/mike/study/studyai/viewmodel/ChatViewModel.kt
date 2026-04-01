@@ -14,6 +14,9 @@ import ru.mike.study.studyai.github.GitHubService
 import ru.mike.study.studyai.github.PrReviewService
 import ru.mike.study.studyai.github.ReviewedPrStore
 import ru.mike.study.studyai.github.WebhookController
+import ru.mike.study.studyai.crm.CrmDatabase
+import ru.mike.study.studyai.crm.CrmMcpRegistrar
+import ru.mike.study.studyai.crm.CrmTicket
 import ru.mike.study.studyai.data.Chat
 import ru.mike.study.studyai.data.OpenAiFunction
 import ru.mike.study.studyai.data.OpenAiTool
@@ -59,6 +62,10 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
     private var webhookController: WebhookController? = null
     private val _prReviewStatus = MutableStateFlow("")
     val prReviewStatus: StateFlow<String> = _prReviewStatus.asStateFlow()
+
+    // CRM Support
+    private val _activeTicket = MutableStateFlow<CrmTicket?>(null)
+    val activeTicket: StateFlow<CrmTicket?> = _activeTicket.asStateFlow()
 
     private fun createOpenAiService(): OpenAiService {
         val s = _appSettings.value
@@ -221,6 +228,8 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
     val awaitingPhaseConfirmation: StateFlow<Boolean> = _awaitingPhaseConfirmation.asStateFlow()
 
     init {
+        CrmDatabase.initialize()
+        CrmMcpRegistrar.register()
         loadProfiles()
         loadChats()
         initWeatherNotifications()
@@ -455,6 +464,7 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
         val chat = chatStorage.createNewChat("Chat ${_chats.value.size + 1}")
         _chats.value = listOf(chat) + _chats.value
         selectChatInternal(chat.id)
+        _activeTicket.value = null
         webhookController?.checkNow()
     }
 
@@ -1039,13 +1049,34 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
 
                 McpLogger.log("Sending message with ${openAiTools.size} tools (RAG mode: ${_ragMode.value})")
 
-                // Send message with tools (inject RAG context if needed)
+                // Inject active CRM ticket context
+                val ticketContext = _activeTicket.value?.let { ticket ->
+                    """
+                    АКТИВНЫЙ ТИКЕТ ПОДДЕРЖКИ:
+                    Номер: #${ticket.number}
+                    Название: ${ticket.title}
+                    Приоритет: ${ticket.priority}
+                    Статус: ${ticket.status}
+                    Пользователь: ${ticket.user.name} (${ticket.user.email})
+                    Версия: ${ticket.affectedVersion ?: "не указана"}
+                    Теги: ${ticket.tags.joinToString(", ")}
+
+                    Описание: ${ticket.description}
+                    ${ticket.stepsToReproduce?.let { "\nШаги воспроизведения:\n$it" } ?: ""}
+
+                    Ты — ассистент технической поддержки. Отвечай строго в контексте этого тикета, используй документацию проекта из инструментов поиска.
+                    """.trimIndent()
+                }
+                val combinedSystemContext = listOfNotNull(ticketContext, ragSystemContext)
+                    .joinToString("\n\n").ifBlank { null }
+
+                // Send message with tools (inject RAG context + ticket if needed)
                 var result = openAiService.sendMessageWithTools(
                     text,
                     openAiTools,
                     _temperature.value,
                     effectiveModel,
-                    ragSystemContext,
+                    combinedSystemContext,
                     _maxTokens.value,
                     effectiveNumCtx
                 )
@@ -1079,6 +1110,13 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                             runProjectTool(toolName, _appSettings.value.projectPath)
                         } else {
                             val toolResult = mcpManager.callTool(toolName, arguments)
+                            // When a ticket is fetched — set it as active for subsequent messages
+                            if (toolName == "crm_get_ticket" && toolResult.isSuccess) {
+                                val number = arguments?.get("number")?.toString()?.trim('"')?.toIntOrNull()
+                                if (number != null) {
+                                    CrmDatabase.findByNumber(number)?.let { _activeTicket.value = it }
+                                }
+                            }
                             toolResult.fold(
                                 onSuccess = { it.content.firstOrNull()?.text ?: "Success" },
                                 onFailure = { "Error: ${it.message}" }
