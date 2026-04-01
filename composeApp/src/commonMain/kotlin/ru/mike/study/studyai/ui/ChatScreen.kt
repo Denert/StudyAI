@@ -78,6 +78,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val ragCandidateK by viewModel.ragCandidateK.collectAsState()
     val ragFilterEnabled by viewModel.ragFilterEnabled.collectAsState()
     val ragRewriteEnabled by viewModel.ragRewriteEnabled.collectAsState()
+    val prReviewStatus by viewModel.prReviewStatus.collectAsState()
 
     // MCP ViewModel
     val mcpViewModel = remember { McpViewModel() }
@@ -118,6 +119,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
             settings = appSettings,
             openAiApiKey = ApiConfig.apiKey,
             localApiKey = ApiConfig.localApiKey,
+            githubTokenSet = ApiConfig.githubToken.isNotBlank(),
+            prReviewStatus = prReviewStatus,
             onSave = { viewModel.updateSettings(it) },
             onLocalBaseUrlChange = { viewModel.saveLocalBaseUrl(it) },
             onDismiss = { showSettingsDialog = false }
@@ -130,7 +133,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
             maxTokens = maxTokens,
             numCtx = numCtx,
             provider = appSettings.provider,
-            onSave = { t, mt, nc -> viewModel.saveModelParams(t, mt, nc) },
+            thinkingEnabled = appSettings.thinkingEnabled,
+            onSave = { t, mt, nc, th -> viewModel.saveModelParams(t, mt, nc, th) },
             onDismiss = { showModelParamsDialog = false }
         )
     }

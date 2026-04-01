@@ -24,7 +24,9 @@ data class AppSettings(
     val taskStateExtractionEnabled: Boolean = true,
     val temperature: Float = 0.7f,
     val maxTokens: Int = 2048,
-    val numCtx: Int = 4096
+    val numCtx: Int = 4096,
+    val thinkingEnabled: Boolean = true,
+    val prReviewEnabled: Boolean = false
 ) {
     val effectiveBaseUrl: String get() = when (provider) {
         LlmProvider.OPENAI -> "https://api.openai.com"

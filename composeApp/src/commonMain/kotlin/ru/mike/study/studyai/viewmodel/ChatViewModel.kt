@@ -10,6 +10,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import ru.mike.study.studyai.api.OpenAiService
 import ru.mike.study.studyai.api.ToolResult
+import ru.mike.study.studyai.github.GitHubService
+import ru.mike.study.studyai.github.PrReviewService
+import ru.mike.study.studyai.github.ReviewedPrStore
+import ru.mike.study.studyai.github.WebhookController
 import ru.mike.study.studyai.data.Chat
 import ru.mike.study.studyai.data.OpenAiFunction
 import ru.mike.study.studyai.data.OpenAiTool
@@ -50,6 +54,12 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
     var ragService = createRagService()
         private set
 
+    // PR Review
+    private val reviewedPrStore = ReviewedPrStore()
+    private var webhookController: WebhookController? = null
+    private val _prReviewStatus = MutableStateFlow("")
+    val prReviewStatus: StateFlow<String> = _prReviewStatus.asStateFlow()
+
     private fun createOpenAiService(): OpenAiService {
         val s = _appSettings.value
         val key = when (s.provider) {
@@ -59,6 +69,7 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
         }
         return OpenAiService(key, s.effectiveBaseUrl).also { service ->
             service.setMemoryConfig(s.systemPromptEnabled, s.invariantsEnabled, s.profileMemoryEnabled)
+            service.setThinkingEnabled(s.thinkingEnabled)
         }
     }
 
@@ -82,6 +93,7 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
         openAiService = createOpenAiService()
         ragService = createRagService()
         startOllamaIfNeeded(settings)
+        startWebhookIfNeeded(settings)
         // Re-apply current chat context to the new service
         val chat = _currentChat.value
         if (chat != null) {
@@ -213,6 +225,53 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
         loadChats()
         initWeatherNotifications()
         startOllamaIfNeeded(_appSettings.value)
+        startWebhookIfNeeded(_appSettings.value)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        webhookController?.stop()
+    }
+
+    private fun startWebhookIfNeeded(settings: AppSettings) {
+        webhookController?.stop()
+        webhookController = null
+        if (!settings.prReviewEnabled || settings.projectPath.isBlank()) return
+
+        val ownerRepo = GitHubService.parseOwnerRepo(settings.projectPath)
+            ?.let { (owner, repo) -> "$owner/$repo" } ?: run {
+            println("PrWatcher: could not detect GitHub repo from projectPath")
+            _prReviewStatus.value = "Не удалось определить репозиторий из пути проекта"
+            return
+        }
+
+        val key = when (settings.provider) {
+            ru.mike.study.studyai.config.LlmProvider.OPENAI -> openAiApiKey
+            ru.mike.study.studyai.config.LlmProvider.LOCAL -> localApiKey
+            else -> ""
+        }
+        val prReviewService = PrReviewService(
+            gitHubService = GitHubService(ru.mike.study.studyai.config.ApiConfig.githubToken),
+            ragService = ragService,
+            appSettings = settings,
+            apiKey = key,
+            reviewedPrStore = reviewedPrStore,
+            onStatusUpdate = { _prReviewStatus.value = it },
+            onChatMessage = { message ->
+                addSystemMessage("🔔 **PR Review**\n$message")
+            }
+        )
+        webhookController = WebhookController(
+            projectPath = settings.projectPath,
+            ownerRepo = ownerRepo,
+            scope = viewModelScope,
+            githubService = GitHubService(ru.mike.study.studyai.config.ApiConfig.githubToken),
+            reviewedPrStore = reviewedPrStore,
+            onEvent = { branch, sha ->
+                prReviewService.reviewByBranch(ownerRepo, branch, sha)
+            }
+        )
+        webhookController?.start()
     }
 
     private fun startOllamaIfNeeded(settings: AppSettings) {
@@ -396,6 +455,7 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
         val chat = chatStorage.createNewChat("Chat ${_chats.value.size + 1}")
         _chats.value = listOf(chat) + _chats.value
         selectChatInternal(chat.id)
+        webhookController?.checkNow()
     }
 
     /**
@@ -540,17 +600,19 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
         _temperature.value = value.coerceIn(0f, 2f)
     }
 
-    fun saveModelParams(temperature: Float, maxTokens: Int, numCtx: Int) {
+    fun saveModelParams(temperature: Float, maxTokens: Int, numCtx: Int, thinkingEnabled: Boolean) {
         _temperature.value = temperature.coerceIn(0f, 2f)
         _maxTokens.value = maxTokens
         _numCtx.value = numCtx
         val updated = _appSettings.value.copy(
             temperature = temperature.coerceIn(0f, 2f),
             maxTokens = maxTokens,
-            numCtx = numCtx
+            numCtx = numCtx,
+            thinkingEnabled = thinkingEnabled
         )
         _appSettings.value = updated
         AppSettingsStore.save(updated)
+        openAiService.setThinkingEnabled(thinkingEnabled)
     }
 
     fun setModel(value: String) {

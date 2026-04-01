@@ -88,4 +88,12 @@ object ApiConfig {
         println("Local API Key loaded: ${if (key.isNotEmpty()) "${key.take(8)}..." else "EMPTY"}")
         key
     }
+
+    val githubToken: String by lazy {
+        localProperties.getProperty("GITHUB_TOKEN") ?: ""
+    }
+
+    val webhookSecret: String by lazy {
+        localProperties.getProperty("WEBHOOK_SECRET") ?: ""
+    }
 }

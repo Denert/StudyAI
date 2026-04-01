@@ -16,7 +16,8 @@ data class OpenAiRequest(
     @SerialName("max_tokens")
     val maxTokens: Int? = null,
     @SerialName("num_ctx")
-    val numCtx: Int? = null
+    val numCtx: Int? = null,
+    val think: Boolean? = null
 )
 
 @Serializable

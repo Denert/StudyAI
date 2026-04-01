@@ -48,6 +48,8 @@ class OpenAiService(
     baseUrl: String = "https://api.openai.com"
 ) {
     private val chatEndpoint = "$baseUrl/v1/chat/completions"
+    private val isOpenAiApi = baseUrl.contains("openai.com")
+    private var thinkingEnabled: Boolean = true
 
     companion object {
         const val DEFAULT_SLIDING_WINDOW_SIZE = 10
@@ -123,6 +125,10 @@ class OpenAiService(
         memoryProfileEnabled = profile
     }
 
+    fun setThinkingEnabled(enabled: Boolean) {
+        thinkingEnabled = enabled
+    }
+
     fun setFacts(newFacts: List<FactData>) {
         facts.clear()
         facts.addAll(newFacts)
@@ -171,7 +177,8 @@ class OpenAiService(
                 messages = contextMessages,
                 temperature = temperature,
                 maxTokens = maxTokens,
-                numCtx = numCtx
+                numCtx = numCtx,
+                think = if (!thinkingEnabled && !isOpenAiApi) false else null
             )
 
             println("═══════════════════════════════════════════════════════════")
@@ -1015,7 +1022,8 @@ ${lastUserMessage.content}
                 tools = if (tools.isNotEmpty()) tools else null,
                 toolChoice = if (tools.isNotEmpty()) "auto" else null,
                 maxTokens = maxTokens,
-                numCtx = numCtx
+                numCtx = numCtx,
+                think = if (!thinkingEnabled && !isOpenAiApi) false else null
             )
 
             println("═══════════════════════════════════════════════════════════")

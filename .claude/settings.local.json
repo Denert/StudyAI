@@ -25,7 +25,30 @@
       "Bash(ls ~/.studyai/ 2>/dev/null && cat ~/.studyai/*.log 2>/dev/null || echo \"No logs found\")",
       "Bash(ls ~/.studyai/logs/ 2>/dev/null && cat ~/.studyai/logs/*.log 2>/dev/null || echo \"No log files\")",
       "Bash(grep -rn \"onKeyEvent\\\\|KeyEvent\\\\|Key\\\\.\" /Users/mivelichko/AndroidStudioProjects/StudyAI/composeApp/src/jvmMain --include=\"*.kt\" 2>/dev/null | head -30)",
-      "Bash(uvx --version 2>/dev/null && python3 --version 2>/dev/null && which uvx 2>/dev/null || echo \"uvx not found\")"
+      "Bash(uvx --version 2>/dev/null && python3 --version 2>/dev/null && which uvx 2>/dev/null || echo \"uvx not found\")",
+      "Bash(./gradlew :composeApp:compileKotlinDesktop 2>&1 | tail -30)",
+      "Bash(./gradlew :composeApp:compileKotlinJvm 2>&1 | tail -30)",
+      "Read(//Users/mivelichko/AndroidStudioProjects/LoanCalculatorKmp/**)",
+      "Bash(./gradlew :composeApp:compileKotlinJvm 2>&1 | tail -40)",
+      "Bash(./gradlew :composeApp:compileKotlinAndroid 2>&1 | tail -20)",
+      "Bash(./gradlew :composeApp:compileDebugKotlinAndroid 2>&1 | tail -20)",
+      "Bash(git stash && ./gradlew :composeApp:compileDebugKotlinAndroid 2>&1 | grep \"error:\" | head -5 && git stash pop)",
+      "Bash(./gradlew :composeApp:compileKotlinJvm 2>&1 | grep -E \"error:|ERROR|FAILED|BUILD\" | tail -20)",
+      "Bash(./gradlew :composeApp:compileKotlinJvm 2>&1 | grep -E \"error:|BUILD\")",
+      "Bash(cat ~/.studyai/settings.json | python3 -m json.tool 2>/dev/null | grep -E \"prReview|projectPath|provider|localChatModel\")",
+      "Bash(ls ~/.studyai/logs/ 2>/dev/null && cat ~/.studyai/logs/*.log 2>/dev/null | tail -50 || echo \"NO LOGS\")",
+      "Bash(./gradlew compileKotlinJvm 2>&1 | tail -30)",
+      "Bash(./gradlew compileKotlinJvm 2>&1 | grep -E \"error:|FAILED|BUILD\" | head -20)",
+      "Bash(which gh && gh --version && gh auth status 2>&1)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(/opt/homebrew/bin/gh --version)",
+      "Bash(./gradlew compileKotlinJvm 2>&1 | grep -E \"error:|FAILED|BUILD\" | head -10)",
+      "Read(//Users/mivelichko/Documents/StudyAI/**)",
+      "Read(//Users/mivelichko/**)",
+      "Bash(./gradlew compileKotlinJvm 2>&1 | tail -50)",
+      "Bash(./gradlew compileKotlinAndroid 2>&1 | tail -50)",
+      "Bash(./gradlew compileDebugKotlinAndroid 2>&1 | tail -60)",
+      "Bash(./gradlew run 2>&1 | head -100)"
     ]
   }
 }

@@ -49,6 +49,8 @@ kotlin {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutinesSwing)
             implementation("org.apache.pdfbox:pdfbox:2.0.29")
+            implementation(libs.ktor.server.cio)
+            implementation(libs.ktor.server.core)
         }
     }
 }

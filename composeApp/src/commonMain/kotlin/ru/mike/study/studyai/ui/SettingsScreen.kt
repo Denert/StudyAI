@@ -25,6 +25,8 @@ fun SettingsScreen(
     settings: AppSettings,
     openAiApiKey: String,
     localApiKey: String,
+    githubTokenSet: Boolean = false,
+    prReviewStatus: String = "",
     onSave: (AppSettings) -> Unit,
     onLocalBaseUrlChange: (String) -> Unit = {},
     onDismiss: () -> Unit
@@ -44,6 +46,7 @@ fun SettingsScreen(
     var profileMemoryEnabled by remember(settings) { mutableStateOf(settings.profileMemoryEnabled) }
     var contextStrategyEnabled by remember(settings) { mutableStateOf(settings.contextStrategyEnabled) }
     var taskStateExtractionEnabled by remember(settings) { mutableStateOf(settings.taskStateExtractionEnabled) }
+    var prReviewEnabled by remember(settings) { mutableStateOf(settings.prReviewEnabled) }
 
     var availableModels by remember { mutableStateOf<List<String>>(emptyList()) }
     var isLoadingModels by remember { mutableStateOf(false) }
@@ -459,6 +462,70 @@ fun SettingsScreen(
 
                 HorizontalDivider()
 
+                // PR Review via Webhook
+                Text("PR Review (Webhook)", style = MaterialTheme.typography.titleSmall)
+
+                // GitHub token status
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = if (githubTokenSet) "GitHub Token: задан" else "GitHub Token: не задан (добавьте GITHUB_TOKEN в local.properties)",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (githubTokenSet)
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Следить за PR", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Автоматически ревьюить новые PR в проекте из «Путь к проекту»",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = prReviewEnabled, onCheckedChange = { prReviewEnabled = it })
+                }
+
+                if (prReviewEnabled) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "StudyAI установит git hook в проект и будет автоматически ревьюить PR при каждом git push",
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (prReviewStatus.isNotBlank()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = prReviewStatus,
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
                 // Buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -482,7 +549,8 @@ fun SettingsScreen(
                                 invariantsEnabled = invariantsEnabled,
                                 profileMemoryEnabled = profileMemoryEnabled,
                                 contextStrategyEnabled = contextStrategyEnabled,
-                                taskStateExtractionEnabled = taskStateExtractionEnabled
+                                taskStateExtractionEnabled = taskStateExtractionEnabled,
+                                prReviewEnabled = prReviewEnabled
                             )
                         )
                         onDismiss()

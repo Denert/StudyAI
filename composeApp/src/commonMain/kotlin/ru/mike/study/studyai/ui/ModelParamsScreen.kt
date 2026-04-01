@@ -18,12 +18,14 @@ fun ModelParamsScreen(
     maxTokens: Int,
     numCtx: Int,
     provider: LlmProvider,
-    onSave: (temperature: Float, maxTokens: Int, numCtx: Int) -> Unit,
+    thinkingEnabled: Boolean,
+    onSave: (temperature: Float, maxTokens: Int, numCtx: Int, thinkingEnabled: Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempValue by remember { mutableStateOf(temperature) }
     var maxTokensValue by remember { mutableStateOf(maxTokens.toFloat()) }
     var numCtxValue by remember { mutableStateOf(numCtx.toFloat()) }
+    var thinkingValue by remember { mutableStateOf(thinkingEnabled) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -84,6 +86,28 @@ fun ModelParamsScreen(
                     )
                 }
 
+                // Thinking toggle (Local and Ollama providers)
+                if (provider == LlmProvider.LOCAL || provider == LlmProvider.OLLAMA) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Thinking / Reasoning", style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                "Режим размышления модели (например, /think у Qwen3). Отключение ускоряет ответ, но может снизить качество сложных рассуждений.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = thinkingValue,
+                            onCheckedChange = { thinkingValue = it }
+                        )
+                    }
+                }
+
                 HorizontalDivider()
 
                 // Buttons
@@ -95,7 +119,7 @@ fun ModelParamsScreen(
                     TextButton(onClick = onDismiss) { Text("Отмена") }
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = {
-                        onSave(tempValue, maxTokensValue.toInt(), numCtxValue.toInt())
+                        onSave(tempValue, maxTokensValue.toInt(), numCtxValue.toInt(), thinkingValue)
                         onDismiss()
                     }) {
                         Text("Применить")
