@@ -17,6 +17,8 @@ import ru.mike.study.studyai.github.WebhookController
 import ru.mike.study.studyai.crm.CrmDatabase
 import ru.mike.study.studyai.crm.CrmMcpRegistrar
 import ru.mike.study.studyai.crm.CrmTicket
+import ru.mike.study.studyai.filetools.FileToolsService
+import ru.mike.study.studyai.filetools.PendingFileChange
 import ru.mike.study.studyai.data.Chat
 import ru.mike.study.studyai.data.OpenAiFunction
 import ru.mike.study.studyai.data.OpenAiTool
@@ -67,6 +69,35 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
     private val _activeTicket = MutableStateFlow<CrmTicket?>(null)
     val activeTicket: StateFlow<CrmTicket?> = _activeTicket.asStateFlow()
 
+    // File Tools
+    private var fileToolsService = FileToolsService(_appSettings.value.projectPath)
+    private val _pendingFileChanges = mutableListOf<PendingFileChange>()
+    private var _agentTodos: List<String> = emptyList()
+
+    fun applyFileChange(messageIndex: Int, changeIndex: Int) {
+        val msgs = _messages.value.toMutableList()
+        val msg = msgs.getOrNull(messageIndex) ?: return
+        val change = msg.pendingFileChanges.getOrNull(changeIndex) ?: return
+        val success = fileToolsService.applyChange(change)
+        val updatedChanges = msg.pendingFileChanges.toMutableList()
+        updatedChanges[changeIndex] = change.copy(isApplied = success)
+        msgs[messageIndex] = msg.copy(pendingFileChanges = updatedChanges)
+        _messages.value = msgs
+        saveCurrentChat()
+        if (!success) addSystemMessage("❌ Ошибка записи: ${change.path}")
+    }
+
+    fun rejectFileChange(messageIndex: Int, changeIndex: Int) {
+        val msgs = _messages.value.toMutableList()
+        val msg = msgs.getOrNull(messageIndex) ?: return
+        val change = msg.pendingFileChanges.getOrNull(changeIndex) ?: return
+        val updatedChanges = msg.pendingFileChanges.toMutableList()
+        updatedChanges[changeIndex] = change.copy(isApplied = false)
+        msgs[messageIndex] = msg.copy(pendingFileChanges = updatedChanges)
+        _messages.value = msgs
+        saveCurrentChat()
+    }
+
     private fun createOpenAiService(): OpenAiService {
         val s = _appSettings.value
         val key = when (s.provider) {
@@ -99,6 +130,7 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
         AppSettingsStore.save(settings)
         openAiService = createOpenAiService()
         ragService = createRagService()
+        fileToolsService = FileToolsService(settings.projectPath)
         startOllamaIfNeeded(settings)
         startWebhookIfNeeded(settings)
         // Re-apply current chat context to the new service
@@ -1042,8 +1074,39 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                     )))
                     openAiTools.add(OpenAiTool(function = OpenAiFunction(
                         name = "list_files",
-                        description = "Возвращает список .kt файлов проекта.",
+                        description = "Возвращает полный список файлов проекта (все типы: .kt, .xml, .gradle, .md, .json, .yaml и т.д.), исключая build и .git директории.",
                         parameters = json.parseToJsonElement("""{"type":"object","properties":{}}""")
+                    )))
+
+                    // File Tools (read / search / write / edit / delete / agent_todo)
+                    FileToolsService.toolSchemas.forEach { (name, schema) ->
+                        openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                            name = name,
+                            description = FileToolsService.toolDescriptions[name] ?: name,
+                            parameters = json.parseToJsonElement(schema)
+                        )))
+                    }
+
+                    // Git tools
+                    openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                        name = "git_log",
+                        description = "Показывает последние коммиты git репозитория",
+                        parameters = json.parseToJsonElement("""{"type":"object","properties":{"count":{"type":"integer","description":"Количество коммитов (по умолчанию 10)"}}}""")
+                    )))
+                    openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                        name = "git_diff_file",
+                        description = "Показывает diff для конкретного файла",
+                        parameters = json.parseToJsonElement("""{"type":"object","properties":{"path":{"type":"string","description":"Путь к файлу"}},"required":["path"]}""")
+                    )))
+                    openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                        name = "git_add",
+                        description = "Добавляет файл(ы) в git staging area",
+                        parameters = json.parseToJsonElement("""{"type":"object","properties":{"path":{"type":"string","description":"Путь к файлу (или . для всех)"}}}""")
+                    )))
+                    openAiTools.add(OpenAiTool(function = OpenAiFunction(
+                        name = "git_commit",
+                        description = "Создаёт git коммит с указанным сообщением",
+                        parameters = json.parseToJsonElement("""{"type":"object","properties":{"message":{"type":"string","description":"Сообщение коммита"}},"required":["message"]}""")
                     )))
                 }
 
@@ -1067,7 +1130,35 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                     Ты — ассистент технической поддержки. Отвечай строго в контексте этого тикета, используй документацию проекта из инструментов поиска.
                     """.trimIndent()
                 }
-                val combinedSystemContext = listOfNotNull(ticketContext, ragSystemContext)
+                val fileToolsContext = if (!isOllama && _appSettings.value.projectPath.isNotBlank()) {
+                    """
+                    Ты — агент-разработчик с прямым доступом к файловой системе проекта (рабочая директория: ${_appSettings.value.projectPath}).
+
+                    ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ КАЖДОГО ЗАПРОСА:
+                    Перед любым ответом, предложением или изменением — СНАЧАЛА прочитай реальные файлы проекта.
+                    Запрещено отвечать, опираясь на предположения, шаблоны или знания из обучения — только на актуальное содержимое файлов.
+
+                    Алгоритм для КАЖДОГО запроса:
+                    1. Используй file_list чтобы понять структуру (если она ещё не известна)
+                    2. Используй file_search чтобы найти нужные файлы / классы / функции
+                    3. Используй file_read чтобы прочитать конкретные файлы перед анализом или изменением
+                    4. Только после чтения — формулируй ответ или вноси изменения через file_edit / file_write
+
+                    Алгоритм внесения изменений:
+                    - Изменить часть файла → file_read → file_edit (old_string/new_string)
+                    - Создать / полностью переписать файл → file_read (если существует) → file_write
+                    - Удалить файл → file_delete
+
+                    Жёсткие запреты:
+                    - НЕ предлагай изменения не прочитав файл — ты не знаешь актуальный код
+                    - НЕ показывай код в тексте ответа вместо вызова file_edit/file_write
+                    - НЕ изменяй файлы за пределами рабочей директории
+                    - НЕ дублируй содержимое файла в тексте после записи — только краткое резюме (1-2 предложения)
+                    - Если нужно несколько изменений — вызывай инструменты последовательно, по одному файлу
+                    """.trimIndent()
+                } else null
+
+                val combinedSystemContext = listOfNotNull(fileToolsContext, ticketContext, ragSystemContext)
                     .joinToString("\n\n").ifBlank { null }
 
                 // Send message with tools (inject RAG context + ticket if needed)
@@ -1106,8 +1197,10 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                             val strategy = arguments?.get("strategy")?.toString()?.trim('"') ?: "fixed"
                             val ctx = ragService.getContext(query, strategy)
                             if (ctx.isBlank()) "Документы по запросу не найдены." else ctx
-                        } else if (toolName in listOf("git_branch", "git_status", "git_diff", "list_files")) {
-                            runProjectTool(toolName, _appSettings.value.projectPath)
+                        } else if (toolName in listOf("git_branch", "git_status", "git_diff", "list_files", "git_log", "git_diff_file", "git_add", "git_commit")) {
+                            runProjectTool(toolName, _appSettings.value.projectPath, arguments)
+                        } else if (toolName in listOf("file_list", "file_read", "file_search", "file_write", "file_edit", "file_delete", "agent_todo")) {
+                            runFileTool(toolName, arguments)
                         } else {
                             val toolResult = mcpManager.callTool(toolName, arguments)
                             // When a ticket is fetched — set it as active for subsequent messages
@@ -1127,11 +1220,12 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                         McpLogger.log("Tool $toolName result: ${resultContent.take(100)}")
                     }
 
-                    // Continue conversation with tool results
+                    // Continue conversation with tool results (pass tools so model can chain calls)
                     result = openAiService.continueWithToolResults(
                         toolResults,
                         _temperature.value,
-                        effectiveModel
+                        effectiveModel,
+                        openAiTools
                     )
                 }
 
@@ -1139,10 +1233,16 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
 
                 result.fold(
                     onSuccess = { chatResult ->
+                        val pendingChanges = _pendingFileChanges.toList()
+                        _pendingFileChanges.clear()
+                        val todos = _agentTodos
+                        _agentTodos = emptyList()
                         val aiMessage = ChatMessage(
                             content = chatResult.content ?: "",
                             isFromUser = false,
-                            metadata = chatResult.metadata
+                            metadata = chatResult.metadata,
+                            pendingFileChanges = pendingChanges,
+                            agentTodos = todos
                         )
                         _messages.value = _messages.value + aiMessage
 
@@ -1161,6 +1261,8 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                         }
                     },
                     onFailure = { error ->
+                        _pendingFileChanges.clear()
+                        _agentTodos = emptyList()
                         val errorMessage = ChatMessage(
                             content = "Error: ${error.message ?: "Unknown error"}",
                             isFromUser = false
@@ -1169,6 +1271,8 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
                     }
                 )
             } catch (e: Exception) {
+                _pendingFileChanges.clear()
+                _agentTodos = emptyList()
                 _messages.value = _messages.value.dropLast(1)
                 val errorMessage = ChatMessage(
                     content = "Error: ${e.message ?: "Unknown error"}",
@@ -1264,14 +1368,30 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
         }
     }
 
-    private fun runProjectTool(toolName: String, projectPath: String): String {
+    private fun runProjectTool(toolName: String, projectPath: String, arguments: JsonObject? = null): String {
         if (projectPath.isBlank()) return "Путь к проекту не задан."
         return try {
             val (cmd, args) = when (toolName) {
                 "git_branch" -> "git" to listOf("-C", projectPath, "branch", "-a")
                 "git_status" -> "git" to listOf("-C", projectPath, "status", "--short")
                 "git_diff"   -> "git" to listOf("-C", projectPath, "diff", "HEAD", "--stat")
-                "list_files" -> "find" to listOf(projectPath, "-name", "*.kt", "-not", "-path", "*/build/*")
+                "list_files" -> "find" to listOf(projectPath, "-not", "-path", "*/build/*", "-not", "-path", "*/.git/*", "-not", "-path", "*/.gradle/*", "-type", "f")
+                "git_log" -> {
+                    val count = FileToolsService.extractString(arguments, "count")?.toIntOrNull() ?: 10
+                    return runGitCommand(listOf("log", "--oneline", "-$count"), projectPath)
+                }
+                "git_diff_file" -> {
+                    val path = FileToolsService.extractString(arguments, "path") ?: "."
+                    return runGitCommand(listOf("diff", "HEAD", path), projectPath)
+                }
+                "git_add" -> {
+                    val path = FileToolsService.extractString(arguments, "path") ?: "."
+                    return runGitCommand(listOf("add", path), projectPath)
+                }
+                "git_commit" -> {
+                    val message = FileToolsService.extractString(arguments, "message") ?: "Update"
+                    return runGitCommand(listOf("commit", "-m", message), projectPath)
+                }
                 else -> return "Неизвестный инструмент: $toolName"
             }
             val process = ProcessBuilder(listOf(cmd) + args)
@@ -1282,6 +1402,105 @@ class ChatViewModel(private val openAiApiKey: String, private val localApiKey: S
             output.ifBlank { "(пусто)" }
         } catch (e: Exception) {
             "Ошибка выполнения $toolName: ${e.message}"
+        }
+    }
+
+    private fun runGitCommand(args: List<String>, projectPath: String): String {
+        if (projectPath.isBlank()) return "Путь к проекту не задан."
+        return try {
+            val process = ProcessBuilder(listOf("git") + args)
+                .directory(java.io.File(projectPath))
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+            output.ifBlank { "Команда выполнена." }
+        } catch (e: Exception) {
+            "Ошибка git: ${e.message}"
+        }
+    }
+
+    private fun runFileTool(toolName: String, arguments: JsonObject?): String {
+        return when (toolName) {
+            "file_list" -> {
+                val dir = FileToolsService.extractString(arguments, "directory")
+                val pattern = FileToolsService.extractString(arguments, "pattern")
+                fileToolsService.fileList(dir, pattern)
+            }
+            "file_read" -> {
+                val path = FileToolsService.extractString(arguments, "path")
+                    ?: return "Ошибка: не указан path"
+                fileToolsService.fileRead(path)
+            }
+            "file_search" -> {
+                val query = FileToolsService.extractString(arguments, "query")
+                    ?: return "Ошибка: не указан query"
+                val dir = FileToolsService.extractString(arguments, "directory")
+                val pattern = FileToolsService.extractString(arguments, "file_pattern")
+                fileToolsService.fileSearch(query, dir, pattern)
+            }
+            "file_write" -> {
+                val path = FileToolsService.extractString(arguments, "path") ?: return "Параметр path обязателен."
+                val content = FileToolsService.extractString(arguments, "content") ?: return "Параметр content обязателен."
+                val existingIdx = _pendingFileChanges.indexOfFirst { it.path == path }
+                if (existingIdx >= 0) {
+                    val existing = _pendingFileChanges[existingIdx]
+                    val diff = fileToolsService.computeDiff(path, existing.oldContent, content)
+                    _pendingFileChanges[existingIdx] = existing.copy(newContent = content, diff = diff, isDelete = false)
+                    "Файл обновлён в очереди: $path"
+                } else {
+                    val (pending, summary) = fileToolsService.prepareWrite(path, content)
+                    _pendingFileChanges.add(pending)
+                    summary
+                }
+            }
+            "file_edit" -> {
+                val path = FileToolsService.extractString(arguments, "path") ?: return "Параметр path обязателен."
+                val oldStr = FileToolsService.extractString(arguments, "old_string") ?: return "Параметр old_string обязателен."
+                val newStr = FileToolsService.extractString(arguments, "new_string") ?: ""
+                val existingIdx = _pendingFileChanges.indexOfFirst { it.path == path && !it.isDelete }
+                if (existingIdx >= 0) {
+                    // Merge into existing pending change — apply edit to in-memory content
+                    val existing = _pendingFileChanges[existingIdx]
+                    val base = existing.newContent
+                        ?: return "Нельзя применить правку: файл помечен как удалённый."
+                    if (!base.contains(oldStr))
+                        return "Строка не найдена в накопленных изменениях файла $path. Используй file_read и проверь точное содержимое."
+                    val merged = base.replaceFirst(oldStr, newStr)
+                    val diff = fileToolsService.computeDiff(path, existing.oldContent, merged)
+                    _pendingFileChanges[existingIdx] = existing.copy(newContent = merged, diff = diff)
+                    "Правка объединена: $path"
+                } else {
+                    val (pending, summary) = fileToolsService.prepareEdit(path, oldStr, newStr)
+                    _pendingFileChanges.add(pending)
+                    summary
+                }
+            }
+            "file_delete" -> {
+                val path = FileToolsService.extractString(arguments, "path") ?: return "Параметр path обязателен."
+                val existingIdx = _pendingFileChanges.indexOfFirst { it.path == path }
+                if (existingIdx >= 0) {
+                    val existing = _pendingFileChanges[existingIdx]
+                    val oldContent = existing.oldContent ?: ""
+                    val diff = oldContent.lines().joinToString("\n") { "-$it" }
+                    _pendingFileChanges[existingIdx] = existing.copy(
+                        newContent = null,
+                        diff = "--- a/$path\n+++ /dev/null\n$diff",
+                        isDelete = true
+                    )
+                    "Файл помечен на удаление: $path"
+                } else {
+                    val (pending, summary) = fileToolsService.prepareDelete(path)
+                    _pendingFileChanges.add(pending)
+                    summary
+                }
+            }
+            "agent_todo" -> {
+                val todos = FileToolsService.extractStringList(arguments, "todos") ?: emptyList()
+                _agentTodos = todos
+                "TODO список обновлён: ${todos.size} задач."
+            }
+            else -> "Неизвестный инструмент: $toolName"
         }
     }
 

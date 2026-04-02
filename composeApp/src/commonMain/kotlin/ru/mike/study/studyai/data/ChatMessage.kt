@@ -1,5 +1,7 @@
 package ru.mike.study.studyai.data
 
+import ru.mike.study.studyai.filetools.PendingFileChange
+
 /**
  * Task phase for finite state machine
  * Flow: PLANNING → EXECUTION → VALIDATION → DONE
@@ -18,8 +20,10 @@ data class ChatMessage(
     val metadata: MessageMetadata? = null,
     val phase: TaskPhase? = null,           // Текущий этап задачи
     val phaseCompleted: Boolean = false,    // Этап завершён, ждём подтверждения
-    val isSystemNotification: Boolean = false, // Системное уведомление (погода и т.д.)
-    val isQueryRewrite: Boolean = false     // Переформулированный RAG-запрос
+    val isSystemNotification: Boolean = false,       // Системное уведомление (погода и т.д.)
+    val isQueryRewrite: Boolean = false,             // Переформулированный RAG-запрос
+    val pendingFileChanges: List<PendingFileChange> = emptyList(), // Очередь изменений файлов (не сериализуется)
+    val agentTodos: List<String> = emptyList()       // TODO-список агента (не сериализуется)
 )
 
 data class MessageMetadata(

@@ -37,6 +37,14 @@ import ru.mike.study.studyai.rag.RagMode
 import ru.mike.study.studyai.rag.ui.RagScreen
 import ru.mike.study.studyai.rag.ui.RagViewModel
 import ru.mike.study.studyai.viewmodel.ChatViewModel
+import ru.mike.study.studyai.filetools.PendingFileChange
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withStyle
 
 @Composable
 fun ChatScreen(viewModel: ChatViewModel) {
@@ -253,11 +261,13 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     itemsIndexed(
                         items = messages,
                         key = { index, _ -> index }
-                    ) { _, message ->
+                    ) { index, message ->
                         ChatMessageItem(
                             message = message,
                             onConfirmPhase = { viewModel.confirmPhaseTransition() },
-                            onRejectPhase = { viewModel.rejectPhaseTransition() }
+                            onRejectPhase = { viewModel.rejectPhaseTransition() },
+                            onApplyFile = { changeIndex -> viewModel.applyFileChange(index, changeIndex) },
+                            onRejectFile = { changeIndex -> viewModel.rejectFileChange(index, changeIndex) }
                         )
                     }
                 }
@@ -1358,7 +1368,9 @@ fun ChatListItem(
 fun ChatMessageItem(
     message: ChatMessage,
     onConfirmPhase: () -> Unit = {},
-    onRejectPhase: () -> Unit = {}
+    onRejectPhase: () -> Unit = {},
+    onApplyFile: (Int) -> Unit = {},
+    onRejectFile: (Int) -> Unit = {}
 ) {
     // System notification (weather, etc.) - centered with special styling
     if (message.isSystemNotification) {
@@ -1404,9 +1416,9 @@ fun ChatMessageItem(
         horizontalAlignment = if (message.isFromUser) Alignment.End else Alignment.Start
     ) {
 
-        Box(
+        Column(
             modifier = Modifier
-                .widthIn(max = 400.dp)
+                .widthIn(max = 600.dp)
                 .clip(
                     RoundedCornerShape(
                         topStart = 16.dp,
@@ -1444,6 +1456,42 @@ fun ChatMessageItem(
                     }
                 )
             }
+
+            // Inline diff viewer — loop over all pending changes
+            if (message.pendingFileChanges.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                message.pendingFileChanges.forEachIndexed { changeIndex, change ->
+                    Spacer(Modifier.height(8.dp))
+                    PendingChangeBlock(
+                        change = change,
+                        onApply = { onApplyFile(changeIndex) },
+                        onReject = { onRejectFile(changeIndex) }
+                    )
+                }
+            }
+
+            // Agent TODO list
+            if (message.agentTodos.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                var expanded by remember { mutableStateOf(true) }
+                OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("📋 Задачи агента (${message.agentTodos.size})", style = MaterialTheme.typography.labelMedium)
+                            Text(if (expanded) "▲" else "▼")
+                        }
+                        if (expanded) {
+                            message.agentTodos.forEachIndexed { i, todo ->
+                                Text("${i+1}. $todo", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp, top = 2.dp))
+                            }
+                        }
+                    }
+                }
+            }
         }
 
 
@@ -1472,6 +1520,82 @@ fun ChatMessageItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp)
             )
+        }
+    }
+}
+
+@Composable
+fun PendingChangeBlock(
+    change: PendingFileChange,
+    onApply: () -> Unit,
+    onReject: () -> Unit
+) {
+    val isNew = change.oldContent == null
+    val statusColor = when (change.isApplied) {
+        true  -> Color(0xFF2EA043)
+        false -> MaterialTheme.colorScheme.error
+        null  -> if (isNew) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+    }
+    val statusLabel = when (change.isApplied) {
+        true  -> "✅ Применено: ${change.path}"
+        false -> "🚫 Отменено: ${change.path}"
+        null  -> if (isNew) "📄 Новый файл: ${change.path}" else "✏️ Изменение: ${change.path}"
+    }
+
+    Text(
+        text = statusLabel,
+        style = MaterialTheme.typography.labelMedium,
+        color = statusColor
+    )
+
+    Spacer(Modifier.height(6.dp))
+
+    // Diff block
+    val diffText = buildAnnotatedString {
+        change.diff.lines().forEach { line ->
+            when {
+                line.startsWith("+") && !line.startsWith("+++") ->
+                    withStyle(SpanStyle(color = Color(0xFF2EA043), fontFamily = FontFamily.Monospace)) { append(line + "\n") }
+                line.startsWith("-") && !line.startsWith("---") ->
+                    withStyle(SpanStyle(color = Color(0xFFF85149), fontFamily = FontFamily.Monospace)) { append(line + "\n") }
+                else ->
+                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(line + "\n") }
+            }
+        }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+    ) {
+        SelectionContainer {
+            Text(
+                text = diffText,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(8.dp).verticalScroll(rememberScrollState())
+            )
+        }
+    }
+
+    // Кнопки только пока ожидает решения
+    if (change.isApplied == null) {
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = onReject,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text("Отменить", style = MaterialTheme.typography.labelSmall)
+            }
+            Button(
+                onClick = onApply,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text("Применить", style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 }
@@ -1566,3 +1690,4 @@ fun PhaseConfirmationButtons(
         }
     }
 }
+

@@ -77,7 +77,7 @@ class OpenAiService(
         }
         install(HttpTimeout) {
             requestTimeoutMillis = 120_000
-            connectTimeoutMillis = 30_000
+            connectTimeoutMillis = 120_000
             socketTimeoutMillis = 120_000
         }
     }
@@ -1112,7 +1112,8 @@ ${lastUserMessage.content}
     suspend fun continueWithToolResults(
         toolResults: List<ToolResult>,
         temperature: Float = 1.0f,
-        model: String? = null
+        model: String? = null,
+        tools: List<OpenAiTool>? = null
     ): Result<ChatResultWithTools> {
         return try {
             val requestModel = model?.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
@@ -1131,7 +1132,9 @@ ${lastUserMessage.content}
             val request = OpenAiRequest(
                 model = requestModel,
                 messages = contextMessages,
-                temperature = temperature
+                temperature = temperature,
+                tools = if (!tools.isNullOrEmpty()) tools else null,
+                toolChoice = if (!tools.isNullOrEmpty()) "auto" else null
             )
 
             println("═══════════════════════════════════════════════════════════")

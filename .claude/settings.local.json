@@ -48,7 +48,16 @@
       "Bash(./gradlew compileKotlinJvm 2>&1 | tail -50)",
       "Bash(./gradlew compileKotlinAndroid 2>&1 | tail -50)",
       "Bash(./gradlew compileDebugKotlinAndroid 2>&1 | tail -60)",
-      "Bash(./gradlew run 2>&1 | head -100)"
+      "Bash(./gradlew run 2>&1 | head -100)",
+      "Bash(cp /Users/mivelichko/AndroidStudioProjects/StudyAI/gradle/wrapper/gradle-wrapper.jar /Users/mivelichko/AndroidStudioProjects/StudyAI/loudnessFix/gradle/wrapper/gradle-wrapper.jar\ncp /Users/mivelichko/AndroidStudioProjects/StudyAI/gradlew /Users/mivelichko/AndroidStudioProjects/StudyAI/loudnessFix/gradlew\ncp /Users/mivelichko/AndroidStudioProjects/StudyAI/gradlew.bat /Users/mivelichko/AndroidStudioProjects/StudyAI/loudnessFix/gradlew.bat\nchmod +x /Users/mivelichko/AndroidStudioProjects/StudyAI/loudnessFix/gradlew)",
+      "Bash(./gradlew :composeApp:compileKotlinDesktop 2>&1 | tail -40)",
+      "Bash(./gradlew :composeApp:tasks 2>&1 | grep -i \"kotlin\\\\|compile\" | head -20)",
+      "Bash(./gradlew :composeApp:compileDebugSources 2>&1 | grep -E \"error:|warning:|BUILD\" | head -30)",
+      "Bash(./gradlew :composeApp:compileDebugSources 2>&1 | grep -E \"error:|e:\" | head -30)",
+      "Bash(./gradlew :composeApp:compileDebugSources 2>&1 | grep -E \"e:.*filetools|e:.*ChatScreen|e:.*ChatViewModel\" | head -20)",
+      "Bash(./gradlew :composeApp:compileKotlinJvm 2>&1 | grep -E \"e:|BUILD\" | head -20)",
+      "Bash(./gradlew :composeApp:compileKotlinJvm 2>&1 | grep -E \"^e:|BUILD \\(SUCCESSFUL|FAILED\\)\" | head -20)",
+      "Bash(./gradlew :composeApp:compileKotlinJvm 2>&1 | grep -E \"^e:|BUILD \\(SUCCESSFUL|FAILED\\)\")"
     ]
   }
 }
